@@ -23,6 +23,7 @@ from .drivers import PrinterStatus
 from .controls import Controls
 from .drivers.base import ControlError, ControlsDisabled
 from .gcode import GcodeCache
+from .library import Library
 from .hub import Hub
 from .relay import Go2rtc, decode_go2rtc_offer, encode_answer, fix_answer, fix_offer, pump
 
@@ -44,6 +45,9 @@ class TempBody(BaseModel):
 class LightBody(BaseModel):
     on: bool
 
+class FileBody(BaseModel):
+    label: str | None = Field(None, max_length=60)
+
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
@@ -61,9 +65,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         for driver in hub.drivers.values():
             driver.controls_enabled = settings.controls_enabled
         app.state.controls = Controls(engine, settings.controls_enabled)
-        app.state.gcode = GcodeCache(settings.data_dir, {d.config.id: d.config for d in hub.drivers.values()})
-        if settings.gcode_preview:
-            for driver in hub.drivers.values():
+        configs = {d.config.id: d.config for d in hub.drivers.values()}
+        library = None
+        if settings.capture_files:
+            try:
+                library = Library(engine, settings.library_root, configs)
+            except OSError as exc:  # e.g. a library folder the app can't write to: run without capture
+                log.error("file capture is off: can't use %s (%s)", settings.library_root, exc)
+        app.state.library = library
+        app.state.gcode = GcodeCache(settings.data_dir, configs, library=library)
+        for driver in hub.drivers.values():
+            if library:
+                driver.on_notice(library.on_notice)
+                driver.on_status(library.on_status)
+            if settings.gcode_preview:
                 driver.on_status(app.state.gcode.on_status)
         app.state.camera = CameraRelay(min_interval=settings.camera_min_interval)
         app.state.go2rtc = (Go2rtc(settings.go2rtc_url, settings.camera_callback_url, settings.data_dir)
@@ -74,6 +89,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             await hub.stop()
             await app.state.gcode.stop()
+            if app.state.library:
+                await app.state.library.stop()
             engine.dispose()
 
     app = FastAPI(title="printer-api", version=VERSION, description=about, lifespan=lifespan)
@@ -89,7 +106,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def public_config() -> dict:
         return {"version": VERSION, "tz": settings.tz, "controls_enabled": settings.controls_enabled,
                 "reconnect_seconds": settings.reconnect_seconds,
-                "camera_mode": "relay" if settings.go2rtc_url else "direct"}
+                "camera_mode": "relay" if settings.go2rtc_url else "direct",
+                "capture_files": bool(getattr(app.state, "library", None))}
 
     @app.get("/api/printers", response_model=list[PrinterStatus])
     def list_printers() -> list[PrinterStatus]:
@@ -122,6 +140,62 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(404, "no G-code for the current print")
         return FileResponse(app.state.gcode.path(printer_id), media_type="text/plain",
                             headers={"Cache-Control": "no-store"})
+
+    # --- captured files and print history (app/library.py has the rules) ---
+
+    def library_of() -> Library:
+        if not app.state.library:
+            raise HTTPException(404, "file capture is turned off (CAPTURE_FILES)")
+        return app.state.library
+
+    @app.get("/api/files")
+    def list_files(label: str | None = None, inbox: bool = False) -> list[dict]:
+        return library_of().list(label=label, inbox=inbox)
+
+    @app.get("/api/files/{file_id}")
+    def file_detail(file_id: int) -> dict:
+        d = library_of().detail(file_id)
+        if not d:
+            raise HTTPException(404, "no such file")
+        return d
+
+    @app.get("/api/files/{file_id}/raw")
+    def file_raw(file_id: int) -> FileResponse:
+        lib = library_of()
+        f = lib.get(file_id)
+        if not f or not lib.file_path(f).is_file():
+            raise HTTPException(404, "no such file")
+        return FileResponse(lib.file_path(f), media_type="text/plain", filename=f.filename,
+                            content_disposition_type="inline")
+
+    @app.get("/api/files/{file_id}/thumbnail")
+    def file_thumb(file_id: int) -> FileResponse:
+        lib = library_of()
+        f = lib.get(file_id)
+        if not f or not lib.thumb_path(f).is_file():
+            raise HTTPException(404, "no thumbnail")
+        return FileResponse(lib.thumb_path(f), media_type="image/png", headers={"Cache-Control": "max-age=86400"})
+
+    @app.patch("/api/files/{file_id}")
+    def file_update(file_id: int, body: FileBody) -> dict:
+        d = library_of().set_label(file_id, body.label)
+        if not d:
+            raise HTTPException(404, "no such file")
+        return d
+
+    @app.delete("/api/files/{file_id}")
+    def file_delete(file_id: int) -> dict:
+        if not library_of().delete(file_id):
+            raise HTTPException(404, "no such file")
+        return {"ok": True}
+
+    @app.get("/api/labels")
+    def labels() -> list[dict]:
+        return library_of().labels()
+
+    @app.get("/api/history")
+    def history(limit: int = 200) -> list[dict]:
+        return library_of().history(limit=max(1, min(limit, 1000)))
 
     # --- controls (app/controls.py has the rules) ---
 

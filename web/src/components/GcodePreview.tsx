@@ -85,7 +85,20 @@ function cssColor(name: string, fallback: string): THREE.Color {
   return c;
 }
 
-function Scene({ tp, size, progress, interactive }: { tp: Toolpath; size: number; progress: number; interactive: boolean }) {
+function Scene({
+  tp,
+  size,
+  progress,
+  interactive,
+  byHeight = false,
+}: {
+  tp: Toolpath;
+  size: number;
+  progress: number;
+  interactive: boolean;
+  /** Shade the lines darker low down and brighter up top, so a whole part reads as a shape. */
+  byHeight?: boolean;
+}) {
   const host = React.useRef<HTMLDivElement>(null);
   const api = React.useRef<{ setDone: (k: number) => void } | null>(null);
 
@@ -108,7 +121,24 @@ function Scene({ tp, size, progress, interactive }: { tp: Toolpath; size: number
     todoGeo.setAttribute("position", attr);
     const brand = cssColor("--brand", "#2563eb");
     const muted = cssColor("--muted-foreground", "#71717a");
-    const done = new THREE.LineSegments(doneGeo, new THREE.LineBasicMaterial({ color: brand }));
+    if (byHeight) {
+      const colors = new Float32Array(tp.positions.length);
+      const zLo = tp.min[2];
+      const span = Math.max(0.001, tp.max[2] - zLo);
+      const dark = brand.clone().multiplyScalar(0.35);
+      const c = new THREE.Color();
+      for (let i = 0; i < tp.positions.length; i += 3) {
+        c.copy(dark).lerp(brand, (tp.positions[i + 2] - zLo) / span);
+        colors[i] = c.r;
+        colors[i + 1] = c.g;
+        colors[i + 2] = c.b;
+      }
+      doneGeo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    }
+    const done = new THREE.LineSegments(
+      doneGeo,
+      byHeight ? new THREE.LineBasicMaterial({ vertexColors: true }) : new THREE.LineBasicMaterial({ color: brand }),
+    );
     const todo = new THREE.LineSegments(
       todoGeo,
       new THREE.LineBasicMaterial({ color: muted, transparent: true, opacity: 0.18, depthWrite: false }),
@@ -191,7 +221,7 @@ function Scene({ tp, size, progress, interactive }: { tp: Toolpath; size: number
       renderer.dispose();
       renderer.domElement.remove();
     };
-  }, [tp, interactive]);
+  }, [tp, interactive, byHeight]);
 
   const k = printedCount(tp, progress * size);
   React.useEffect(() => {
@@ -205,6 +235,36 @@ function Scene({ tp, size, progress, interactive }: { tp: Toolpath; size: number
       aria-label={interactive ? "3D preview of the print. Drag to turn it, scroll to zoom." : "3D preview of the print."}
       role="img"
     />
+  );
+}
+
+/** A stored file's whole toolpath in 3D (no progress: all of it in the accent colour). */
+export function GcodeFileView({ url, className, interactive = true }: { url: string; className?: string; interactive?: boolean }) {
+  const [state, setState] = React.useState<{ url: string; path?: Toolpath; error?: string } | null>(null);
+  React.useEffect(() => {
+    let stop = false;
+    setState(null);
+    fetch(url)
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(`the server answered ${r.status}`))))
+      .then((text) => !stop && setState({ url, path: parseGcode(text) }))
+      .catch((e: Error) => !stop && setState({ url, error: e.message }));
+    return () => {
+      stop = true;
+    };
+  }, [url]);
+
+  let message: string | null = null;
+  if (!state || state.url !== url) message = "Loading the file…";
+  else if (state.error) message = `Couldn't load the file (${state.error}).`;
+  else if (!state.path?.count) message = "This file has no moves to draw.";
+  return (
+    <div className={cn("relative overflow-hidden", className)}>
+      {!message && state?.path ? (
+        <Scene tp={state.path} size={Infinity} progress={1} interactive={interactive} byHeight />
+      ) : (
+        <div className="flex h-full items-center justify-center p-4 text-center text-sm text-muted-foreground">{message}</div>
+      )}
+    </div>
   );
 }
 

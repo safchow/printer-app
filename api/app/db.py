@@ -37,6 +37,44 @@ class ActionLog(SQLModel, table=True):
     at: datetime
 
 
+class Label(SQLModel, table=True):
+    """A name saf sorts captured files under."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(unique=True)
+
+
+class StoredFile(SQLModel, table=True):
+    """One captured print file, stored once by content (sha256). No label = in the Inbox."""
+
+    __tablename__ = "stored_file"
+    id: int | None = Field(default=None, primary_key=True)
+    sha256: str = Field(unique=True, index=True)
+    filename: str  # the latest name it was seen under
+    size: int
+    path: str  # relative to LIBRARY_ROOT
+    label_id: int | None = Field(default=None, foreign_key="label.id", index=True)
+    source: str = "printer"  # printer | print (the once-per-print backstop) | claude
+    printer_id: str | None = None
+    meta: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    first_seen: datetime
+    last_seen: datetime
+
+
+class PrintJob(SQLModel, table=True):
+    """One print the app watched, from start to its end state."""
+
+    __tablename__ = "print_job"
+    id: int | None = Field(default=None, primary_key=True)
+    printer_id: str = Field(index=True)
+    filename: str
+    file_id: int | None = Field(default=None, foreign_key="stored_file.id", index=True)
+    started_at: datetime
+    ended_at: datetime | None = None
+    result: str = "printing"  # printing | complete | cancelled | error | unknown
+    print_duration: float | None = None
+
+
 def make_engine(database_url: str):
     return create_engine(database_url, connect_args={"check_same_thread": False})
 
@@ -48,4 +86,4 @@ def migrate(database_url: str) -> None:
     command.upgrade(cfg, "head")
 
 
-__all__ = ["ActionLog", "Printer", "Session", "make_engine", "migrate"]
+__all__ = ["ActionLog", "Label", "PrintJob", "Printer", "Session", "StoredFile", "make_engine", "migrate"]

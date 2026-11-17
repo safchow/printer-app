@@ -103,3 +103,9 @@ def wait_for_sync(predicate, timeout: float = 5.0, interval: float = 0.02):
             return True
         time.sleep(interval)
     raise AssertionError("condition not met in time")
+
+
+@pytest.fixture(autouse=True)
+def _library_in_tmp(tmp_path, monkeypatch):
+    """Captured files go to a temp folder in every test, never ./library."""
+    monkeypatch.setenv("LIBRARY_ROOT", str(tmp_path / "library"))

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import abc
+import logging
 import asyncio
 from datetime import datetime
 from typing import Awaitable, Callable, Literal
@@ -61,6 +62,8 @@ class PrinterStatus(BaseModel):
 
 
 StatusListener = Callable[[PrinterStatus], Awaitable[None]]
+# (printer id, method, params) for notices a printer pushes, e.g. a new file.
+NoticeListener = Callable[[str, str, object], Awaitable[None]]
 
 
 class ControlsDisabled(RuntimeError):
@@ -90,10 +93,21 @@ class PrinterDriver(abc.ABC):
             reconnect_seconds=reconnect_seconds,
         )
         self._listeners: list[StatusListener] = []
+        self._notice_listeners: list[NoticeListener] = []
         self._task: asyncio.Task | None = None
 
     def on_status(self, listener: StatusListener) -> None:
         self._listeners.append(listener)
+
+    def on_notice(self, listener: NoticeListener) -> None:
+        self._notice_listeners.append(listener)
+
+    async def _notice(self, method: str, params: object) -> None:
+        for listener in list(self._notice_listeners):
+            try:
+                await listener(self.config.id, method, params)
+            except Exception:  # a listener must never break the printer connection
+                logging.getLogger(__name__).exception("notice listener failed")
 
     async def _emit(self) -> None:
         for listener in list(self._listeners):

@@ -20,6 +20,8 @@ services:
       # Printer controls (pause, speed, fans, temperatures, light). Off by default.
       CONTROLS_ENABLED: ${CONTROLS_ENABLED:-false}
       GCODE_PREVIEW: ${GCODE_PREVIEW:-true}
+      # Keep each file sent to the printer (Files and History pages).
+      CAPTURE_FILES: ${CAPTURE_FILES:-true}
       # Camera relay. Set GO2RTC_URL= (empty) in .env to go back to browsers
       # connecting to the printer's camera directly.
       GO2RTC_URL: ${GO2RTC_URL-http://go2rtc:1984}
