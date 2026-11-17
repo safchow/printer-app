@@ -1,0 +1,30 @@
+# Copy to printers.yaml and list your printers.
+#
+# id:        short name used in URLs (lowercase letters, digits, - or _)
+# type:      moonraker (Klipper, incl. Creality K1/K1C/K2 with Moonraker), octoprint,
+#            prusalink or bambu. Only moonraker has a driver so far.
+# host/port: the printer's address. Moonraker's port is usually 7125.
+# camera:    creality_webrtc, mjpeg or none (live camera comes in a later version)
+# cfs:       true if the printer has a Creality Filament System
+#
+# The app keeps one connection per printer and, when a printer is offline,
+# tries again every 30 seconds. It never scans ports.
+
+printers:
+  - id: k1c
+    name: K1C
+    type: moonraker
+    host: 192.168.1.50
+    port: 7125
+    camera: creality_webrtc
+    cfs: true
+    # Optional: bed size override in mm (x, y, z). Normally read from the printer.
+    # bed_size_mm: [220, 220, 250]
+    # Klipper object names for fans and the light. These are the K1 family
+    # defaults; run `python -m app.doctor --probe` once to see your printer's.
+    moonraker:
+      fans:
+        Model fan: output_pin fan0
+        Auxiliary fan: output_pin fan2
+        Case fan: output_pin fan1
+      light: output_pin LED

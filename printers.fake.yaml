@@ -1,0 +1,9 @@
+# Used by `docker compose --profile fake up`: points the app at the fake Moonraker.
+printers:
+  - id: k1c
+    name: K1C (fake)
+    type: moonraker
+    host: fake-moonraker
+    port: 7125
+    camera: creality_webrtc
+    cfs: true
