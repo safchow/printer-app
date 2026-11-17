@@ -1,10 +1,12 @@
-"""Moonraker (Klipper) driver: one websocket per printer, read-only.
+"""Moonraker (Klipper) driver: one websocket per printer.
 
 Rules this driver enforces, whatever the UI does:
 - one connection at a time, only to the configured host and port;
 - when the printer can't be reached, wait `reconnect_seconds` (30 s by default)
   before the next single attempt;
-- only methods in READ_ONLY_METHODS are ever sent.
+- only methods in READ_ONLY_METHODS are sent, plus, when controls are enabled,
+  CONTROL_METHODS; G-code goes out only if it matches ALLOWED_GCODE exactly;
+- one control at a time, never retried.
 """
 
 from __future__ import annotations
@@ -13,17 +15,37 @@ import asyncio
 import itertools
 import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import websockets
 
 from ..config import PrinterConfig
-from .base import Fan, PrinterDriver, PrinterStatus, Temperature
+from .base import ControlError, ControlsDisabled, Fan, PrinterDriver, PrinterStatus, Temperature
 
 log = logging.getLogger(__name__)
 
 READ_ONLY_METHODS = frozenset({"printer.objects.subscribe"})
+CONTROL_METHODS = frozenset({"printer.print.pause", "printer.print.resume", "printer.print.cancel",
+                             "printer.gcode.script"})
+# The only G-code this driver will ever send, whole-line matches.
+ALLOWED_GCODE = tuple(re.compile(p) for p in (
+    r"M220 S([5-9]0|1[0-5]0|160)",  # 50-160 in steps of 10
+    r"M104 S(0|[3-9][0-9]|[12][0-9]{2}|300)",
+    r"M140 S(0|[3-9][0-9]|100)",
+    r"M106 S([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])",
+    r"SET_FAN_SPEED FAN=[A-Za-z0-9_]{1,40} SPEED=(0|0\.[1-9]|1)",
+    r"SET_PIN PIN=[A-Za-z0-9_]{1,40} VALUE=[01]",
+    r"PAUSE|RESUME|CANCEL_PRINT",
+))
+PRINT_MACROS = {"printer.print.pause": "PAUSE", "printer.print.resume": "RESUME",
+                "printer.print.cancel": "CANCEL_PRINT"}
+COMMAND_TIMEOUT = 10.0
+
+
+def gcode_allowed(script: str) -> bool:
+    return any(p.fullmatch(script) for p in ALLOWED_GCODE)
 
 BASE_OBJECTS = (
     "print_stats",
@@ -139,10 +161,23 @@ class MoonrakerDriver(PrinterDriver):
         self._ids = itertools.count(1)
         self._objects: dict[str, dict[str, Any]] = {}
         self.connection_attempts = 0
+        self.controls_enabled = False
+        self._ws = None
+        self._waiters: dict[int, asyncio.Future] = {}
+        self._control_lock = asyncio.Lock()
+
+    def _check(self, method: str, params: dict[str, Any] | None) -> None:
+        if method in READ_ONLY_METHODS:
+            return
+        if method not in CONTROL_METHODS:
+            raise MethodNotAllowed(f"{method} is not allowed")
+        if not self.controls_enabled:
+            raise MethodNotAllowed(f"{method} is not allowed: controls are off")
+        if method == "printer.gcode.script" and not gcode_allowed(str((params or {}).get("script", ""))):
+            raise MethodNotAllowed(f"G-code {params!r} is not allowed")
 
     async def _call(self, ws, method: str, params: dict[str, Any] | None = None) -> int:
-        if method not in READ_ONLY_METHODS:
-            raise MethodNotAllowed(f"{method} is not allowed: this driver is read-only")
+        self._check(method, params)
         rid = next(self._ids)
         await ws.send(json.dumps({"jsonrpc": "2.0", "method": method, "params": params or {}, "id": rid}))
         return rid
@@ -169,10 +204,25 @@ class MoonrakerDriver(PrinterDriver):
         return await self._call(ws, "printer.objects.subscribe", {"objects": subscribed_objects(self.config)})
 
     async def _session(self, ws) -> None:
+        self._ws = ws
+        try:
+            await self._read(ws)
+        finally:
+            self._ws = None
+            for fut in self._waiters.values():
+                if not fut.done():
+                    fut.set_exception(ControlError(502, "the connection to the printer dropped"))
+            self._waiters.clear()
+
+    async def _read(self, ws) -> None:
         pending = await self._subscribe(ws)
         async for raw in ws:
             msg = json.loads(raw)
-            if msg.get("id") == pending:
+            waiter = self._waiters.pop(msg.get("id"), None) if "id" in msg else None
+            if waiter is not None:
+                if not waiter.done():
+                    waiter.set_result(msg)
+            elif msg.get("id") == pending:
                 if "error" in msg:
                     # Usually "Klippy not ready": drop and retry on the normal schedule.
                     raise RuntimeError(msg["error"].get("message", "subscribe failed"))
@@ -202,3 +252,87 @@ class MoonrakerDriver(PrinterDriver):
             "started_at": None, "eta_at": None,
         })
         await self._emit()
+
+    # --- controls -----------------------------------------------------------------
+
+    def _require_enabled(self) -> None:
+        if not self.controls_enabled:
+            raise ControlsDisabled("controls are off (CONTROLS_ENABLED)")
+
+    async def _command(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Send one control and wait for its reply. Never retried."""
+        self._require_enabled()
+        ws = self._ws
+        if ws is None:
+            raise ControlError(503, "not connected to the printer")
+        async with self._control_lock:
+            rid = await self._call(ws, method, params)
+            fut = asyncio.get_running_loop().create_future()
+            self._waiters[rid] = fut
+            try:
+                return await asyncio.wait_for(fut, COMMAND_TIMEOUT)
+            except TimeoutError as exc:
+                raise ControlError(504, "the printer didn't answer in time") from exc
+            finally:
+                self._waiters.pop(rid, None)
+
+    async def _ok(self, method: str, params: dict[str, Any] | None = None) -> None:
+        msg = await self._command(method, params)
+        if "error" in msg:
+            err = msg["error"] or {}
+            raise ControlError(502, f"the printer refused: {err.get('message', 'unknown error')}")
+
+    async def _gcode(self, script: str) -> str:
+        await self._ok("printer.gcode.script", {"script": script})
+        return script
+
+    async def _print_action(self, method: str) -> str:
+        self._require_enabled()
+        msg = await self._command(method)
+        if "error" in msg and (msg["error"] or {}).get("code") == -32601:
+            # This Moonraker build lacks the method, so nothing happened: use the Klipper macro.
+            return await self._gcode(PRINT_MACROS[method])
+        if "error" in msg:
+            raise ControlError(502, f"the printer refused: {msg['error'].get('message', 'unknown error')}")
+        return method
+
+    async def pause(self) -> str:
+        return await self._print_action("printer.print.pause")
+
+    async def resume(self) -> str:
+        return await self._print_action("printer.print.resume")
+
+    async def cancel(self) -> str:
+        return await self._print_action("printer.print.cancel")
+
+    async def set_speed(self, percent: int) -> str:
+        self._require_enabled()
+        return await self._gcode(f"M220 S{percent}")
+
+    async def set_fan(self, name: str, percent: int) -> str:
+        self._require_enabled()
+        obj = self.config.moonraker.fans.get(name)
+        if obj is None:
+            raise ControlError(404, f"no fan called {name!r}")
+        kind, _, short = obj.partition(" ")
+        if kind == "fan_generic" and short:
+            speed = "0" if percent == 0 else "1" if percent == 100 else f"0.{percent // 10}"
+            return await self._gcode(f"SET_FAN_SPEED FAN={short} SPEED={speed}")
+        if obj == "fan":
+            return await self._gcode(f"M106 S{round(percent * 255 / 100)}")
+        raise ControlError(501, f"{obj} can't be set from the app")
+
+    async def set_temp(self, heater: str, target: int) -> str:
+        self._require_enabled()
+        code = {"nozzle": "M104", "bed": "M140"}.get(heater)
+        if code is None:
+            raise ControlError(404, f"no heater called {heater!r}")
+        return await self._gcode(f"{code} S{target}")
+
+    async def set_light(self, on: bool) -> str:
+        self._require_enabled()
+        obj = self.config.moonraker.light or ""
+        kind, _, pin = obj.partition(" ")
+        if kind != "output_pin" or not pin:
+            raise ControlError(501, "this printer has no light the app can switch")
+        return await self._gcode(f"SET_PIN PIN={pin} VALUE={1 if on else 0}")

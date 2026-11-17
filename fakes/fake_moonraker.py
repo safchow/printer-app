@@ -7,6 +7,12 @@ complete states, and can pretend to go offline.
 
     python fakes/fake_moonraker.py --port 7125 --scenario printing
 
+Controls: printer.print.pause / resume / cancel and printer.gcode.script with
+the commands printer-api sends (M220, SET_FAN_SPEED, M104, M140, SET_PIN,
+PAUSE, RESUME, CANCEL_PRINT) change the simulated printer; every script is
+recorded in `scripts`. With print_methods=False the printer.print.* methods
+are missing, as on some vendor Moonraker builds.
+
 Dev controls (not part of real Moonraker):
     POST /fake/scenario/{printing|paused|idle|complete|cancelled}
     POST /fake/offline?seconds=60     drop connections and refuse new ones
@@ -60,7 +66,10 @@ def base_objects() -> dict[str, dict[str, Any]]:
 
 class FakeMoonraker:
     def __init__(self, scenario: str = "printing", tick_seconds: float = 1.0,
-                 filename: str = "phone_stand_v3.gcode", start_progress: float = 0.62):
+                 filename: str = "phone_stand_v3.gcode", start_progress: float = 0.62,
+                 print_methods: bool = True):
+        self.print_methods = print_methods
+        self.scripts: list[str] = []
         self.tick_seconds = tick_seconds
         self.filename = filename
         self.start_progress = start_progress
@@ -171,14 +180,78 @@ class FakeMoonraker:
                     await ws.send_text(json.dumps({"jsonrpc": "2.0", "id": msg.get("id"), "result": {
                         "eventtime": time.monotonic(), "status": self._status_for(wanted)}}))
                 else:
-                    await ws.send_text(json.dumps({"jsonrpc": "2.0", "id": msg.get("id"), "error": {
-                        "code": -32601, "message": f"Method not found: {method}"}}))
+                    try:
+                        changes = self.control(method, msg.get("params") or {})
+                    except LookupError:
+                        await ws.send_text(json.dumps({"jsonrpc": "2.0", "id": msg.get("id"), "error": {
+                            "code": -32601, "message": f"Method not found: {method}"}}))
+                        continue
+                    except ValueError as exc:
+                        await ws.send_text(json.dumps({"jsonrpc": "2.0", "id": msg.get("id"), "error": {
+                            "code": 400, "message": str(exc)}}))
+                        continue
+                    await ws.send_text(json.dumps({"jsonrpc": "2.0", "id": msg.get("id"), "result": "ok"}))
+                    await self.push(changes)
         except (WebSocketDisconnect, RuntimeError):
             pass
         finally:
             self._sockets.discard(ws)
             self._subs.pop(ws, None)
             self.current_connections -= 1
+
+    # --- controls --------------------------------------------------------------------
+    def control(self, method: str, params: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        """Act out a control. LookupError = no such method, ValueError = refused."""
+        actions = {"printer.print.pause": "PAUSE", "printer.print.resume": "RESUME",
+                   "printer.print.cancel": "CANCEL_PRINT"}
+        if method in actions:
+            if not self.print_methods:
+                raise LookupError(method)
+            return self._script(actions[method])
+        if method == "printer.gcode.script":
+            script = str(params.get("script", ""))
+            self.scripts.append(script)
+            return self._script(script)
+        raise LookupError(method)
+
+    def _script(self, script: str) -> dict[str, dict[str, Any]]:
+        before = copy.deepcopy(self.objects)
+        o = self.objects
+        words = script.split()
+        cmd = words[0].upper() if words else ""
+        args = dict(w.split("=", 1) if "=" in w else (w[0].upper(), w[1:]) for w in words[1:])
+        state = o["print_stats"]["state"]
+        if cmd == "PAUSE":
+            if state != "printing":
+                raise ValueError("Print is not active")
+            self.set_scenario("paused")
+        elif cmd == "RESUME":
+            if state != "paused":
+                raise ValueError("Print is not paused, resume aborted")
+            self.set_scenario("printing")
+        elif cmd == "CANCEL_PRINT":
+            if state not in ("printing", "paused"):
+                raise ValueError("Print is not active")
+            self.set_scenario("cancelled")
+        elif cmd == "M220":
+            o["gcode_move"]["speed_factor"] = int(args["S"]) / 100
+        elif cmd == "M104":
+            o["extruder"]["target"] = float(args["S"])
+        elif cmd == "M140":
+            o["heater_bed"]["target"] = float(args["S"])
+        elif cmd == "SET_FAN_SPEED":
+            name = f"fan_generic {args['FAN']}"
+            if name not in o:
+                raise ValueError(f"Unknown fan {args['FAN']}")
+            o[name]["speed"] = float(args["SPEED"])
+        elif cmd == "SET_PIN":
+            name = f"output_pin {args['PIN']}"
+            if name not in o:
+                raise ValueError(f"Unknown pin {args['PIN']}")
+            o[name]["value"] = float(args["VALUE"])
+        else:
+            raise ValueError(f"Unknown command:\"{cmd}\"")
+        return diff(before, self.objects)
 
     async def push(self, changes: dict[str, dict[str, Any]]) -> None:
         if not changes:

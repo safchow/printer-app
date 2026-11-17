@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     reconnect_seconds: float = 30.0
     # At most one camera handshake per printer this often.
     camera_min_interval: float = 5.0
+    # Printer controls (pause, speed, fans, ...). Off = every control answers 501.
+    controls_enabled: bool = False
     # Camera relay (docs/camera-relay.md). Empty = browsers connect to the
     # printer's camera directly, which needs a route to the printer.
     go2rtc_url: str = ""

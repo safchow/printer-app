@@ -22,6 +22,21 @@ class Printer(SQLModel, table=True):
     last_seen: datetime | None = None
 
 
+class ActionLog(SQLModel, table=True):
+    """Every control pressed in the app, including refused ones."""
+
+    __tablename__ = "action_log"
+    id: int | None = Field(default=None, primary_key=True)
+    printer_id: str = Field(index=True)
+    action: str
+    values: dict = Field(default_factory=dict, sa_column=Column("values", JSON, nullable=False))
+    command: str | None = None
+    result: str  # sent | refused | failed
+    detail: str | None = None
+    device: str | None = None
+    at: datetime
+
+
 def make_engine(database_url: str):
     return create_engine(database_url, connect_args={"check_same_thread": False})
 
@@ -33,4 +48,4 @@ def migrate(database_url: str) -> None:
     command.upgrade(cfg, "head")
 
 
-__all__ = ["Printer", "Session", "make_engine", "migrate"]
+__all__ = ["ActionLog", "Printer", "Session", "make_engine", "migrate"]
