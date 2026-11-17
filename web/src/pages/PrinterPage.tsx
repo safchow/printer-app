@@ -123,12 +123,12 @@ function Desktop({ p, ctl, rows }: { p: Printer; ctl: Ctl; rows: ActionRow[] }) 
       <main className="mx-auto flex max-w-[1360px] flex-wrap items-start gap-5 px-8 pt-6 pb-12">
         <section className="flex min-w-0 flex-[999_1_620px] flex-col gap-5">
           <StatusNote p={p} />
-          <Card className="flex flex-col gap-4.5 p-6">
-            <ProgressBody p={p} />
-          </Card>
           <CameraStage printer={p} className="aspect-video rounded-xl border">
             <LiveCamera printer={p} />
           </CameraStage>
+          <Card className="flex flex-col gap-4.5 p-6">
+            <ProgressBody p={p} />
+          </Card>
         </section>
         <aside className="flex min-w-0 flex-[1_1_380px] flex-col gap-4">
           <ErrorLine ctl={ctl} />
