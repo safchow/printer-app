@@ -41,9 +41,10 @@ These rules are enforced in the driver, not just the UI:
 Creality printers on stock firmware stream their camera over WebRTC. By
 default the app runs a small relay, [go2rtc](https://github.com/AlexxIT/go2rtc),
 next to printer-api. The server holds one connection to the printer's camera
-while anyone is watching, and passes the video on to every open page. The
-camera starts by itself on the printer page and the dashboard, and stops when
-you hide the tab. Browsers only talk to the app, so they need no route to the
+while anyone is watching, and passes the video on to every open page. Both
+pages show the 3D model of the print first; the **Camera** button switches
+to the live camera, which connects only while it is shown and stops when you
+switch back or hide the tab. Browsers only talk to the app, so they need no route to the
 printer. How it works, the K1C quirks it fixes and its limits are in
 [docs/camera-relay.md](docs/camera-relay.md).
 
@@ -96,7 +97,7 @@ the full history.
 
 ## 3D preview of the print
 
-Under the camera, the printer page draws the toolpath of the file being
+The printer page and each dashboard card draw the toolpath of the file being
 printed in 3D, with the printed part in the accent colour and a dot where the
 nozzle is. Drag to turn it, scroll to zoom.
 
