@@ -2,7 +2,7 @@ import { clock, isActive } from "@/lib/format";
 import type { Printer } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-/** The camera area with the start / finish timeline over it. Live video comes in a later version. */
+/** The camera area with the start / finish timeline over it. Live video is laid over it as children. */
 export function CameraStage({
   printer,
   size = "page",

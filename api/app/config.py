@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     reconnect_seconds: float = 30.0
     # At most one camera handshake per printer this often.
     camera_min_interval: float = 5.0
+    # Camera relay (docs/camera-relay.md). Empty = browsers connect to the
+    # printer's camera directly, which needs a route to the printer.
+    go2rtc_url: str = ""
+    # How go2rtc reaches this app (the handshake goes through here).
+    camera_callback_url: str = "http://printer-api:8090"
     static_dir: Path | None = None
 
     @property

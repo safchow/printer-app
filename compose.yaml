@@ -17,12 +17,27 @@ services:
       IMPORT_TOKEN: ${IMPORT_TOKEN:-}
       TAILSCALE_SOCKET: ${TAILSCALE_SOCKET:-}
       CAMERA_MIN_INTERVAL: ${CAMERA_MIN_INTERVAL:-5}
+      # Camera relay. Set GO2RTC_URL= (empty) in .env to go back to browsers
+      # connecting to the printer's camera directly.
+      GO2RTC_URL: ${GO2RTC_URL-http://go2rtc:1984}
+      CAMERA_CALLBACK_URL: http://printer-api:8090
     volumes:
       - ${PRINTERS_FILE:-./printers.yaml}:/config/printers.yaml:ro
       - ${DATA_DIR:-./data}:/data
       - ${LIBRARY_ROOT:-./library}:/library
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${PORT:-8090}:8090"
+    depends_on:
+      - go2rtc
+
+  # Camera relay: holds the one connection to each printer's camera while
+  # someone is watching, and serves the video to the app. Nothing published.
+  go2rtc:
+    image: alexxit/go2rtc:1.9.14
+    container_name: printer-go2rtc
+    restart: unless-stopped
+    volumes:
+      - ./go2rtc.yaml:/config/go2rtc.yaml:ro
 
   # A fake K1C for trying the app without a printer:
   #   PRINTERS_FILE=./printers.fake.yaml docker compose --profile fake up -d --build
