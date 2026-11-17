@@ -1,0 +1,10 @@
+# For local development: the fake Moonraker on this machine.
+#   python fakes/fake_moonraker.py --port 7125
+printers:
+  - id: k1c
+    name: K1C (fake)
+    type: moonraker
+    host: 127.0.0.1
+    port: 7125
+    camera: creality_webrtc
+    cfs: true

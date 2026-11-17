@@ -1,0 +1,10 @@
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+web/dist
+api/static
+api/data
+data
+library
+.env
+printers.yaml
