@@ -2,8 +2,10 @@
 
 A private web app for watching and controlling 3D printers: a dashboard of
 every printer and a page per printer, on desktop and phone, with the printer's
-live camera and its controls. The file library and printing from the app come
-in later versions (see the roadmap).
+live camera and its controls, with a 3D view of each print. Next on the
+roadmap is file capture: the server keeps a copy of every file sent to the
+printer (from Creality Print as usual), sorts them with labels and records each
+print. The app doesn't upload or start prints; there is no upload flow.
 
 It runs as one Docker Compose stack on any machine that can reach your
 printers, and is meant to be reached over a private network (Tailscale,
@@ -183,7 +185,7 @@ changing a table in `api/app/db.py`, add a migration with
 | `BIND_ADDRESS` | Private address the web app listens on | `127.0.0.1` |
 | `PORT` | Web port | `8090` |
 | `DATA_DIR` | Database | `./data` |
-| `LIBRARY_ROOT` | Print files (used from the library version on) | `./library` |
+| `LIBRARY_ROOT` | Captured print files (used from the file-capture version on) | `./library` |
 | `PRINTERS_FILE` | Which printers file to mount | `./printers.yaml` |
 | `TZ` | Time zone for times in the app | `UTC` |
 | `CONTROLS_ENABLED` | Turns on the printer controls | `false` |
