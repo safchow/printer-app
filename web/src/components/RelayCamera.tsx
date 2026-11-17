@@ -1,4 +1,4 @@
-import { Play, RotateCcw, Square } from "lucide-react";
+import { RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useRelayCamera } from "@/hooks/useRelayCamera";
 import type { Printer } from "@/lib/types";
@@ -10,7 +10,7 @@ import type { Printer } from "@/lib/types";
 export function RelayCamera({ printer, size = "page" }: { printer: Printer; size?: "card" | "page" }) {
   const offline = printer.state === "offline" || printer.state === "connecting";
   const enabled = printer.has_camera && !offline;
-  const { state, error, stopped, videoRef, retry, stop } = useRelayCamera(printer.id, enabled);
+  const { state, error, videoRef, retry } = useRelayCamera(printer.id, enabled);
   if (!enabled) return null;
 
   // Buttons sit inside the dashboard card's link, so they must not navigate.
@@ -31,12 +31,7 @@ export function RelayCamera({ printer, size = "page" }: { printer: Printer; size
         aria-label={`${printer.name} live camera`}
       />
       {state === "live" && size === "page" && (
-        <>
-          <span className="absolute top-3 left-3 rounded-md bg-background px-2 py-0.5 text-xs font-medium text-red-600">● Live</span>
-          <Button variant="outline" size="sm" onClick={press(stop)} className="absolute top-2.5 right-2.5 bg-background/90">
-            <Square /> Stop
-          </Button>
-        </>
+        <span className="absolute top-3 left-3 rounded-md bg-background px-2 py-0.5 text-xs font-medium text-red-600">● Live</span>
       )}
       {state !== "live" && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-stage px-6 text-center">
@@ -48,11 +43,6 @@ export function RelayCamera({ printer, size = "page" }: { printer: Printer; size
                 <RotateCcw /> Try again
               </Button>
             </>
-          )}
-          {stopped && (
-            <Button variant="brand" onClick={press(retry)}>
-              <Play /> Watch live
-            </Button>
           )}
         </div>
       )}

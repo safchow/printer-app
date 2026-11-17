@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Play, Square } from "lucide-react";
+import { Play } from "lucide-react";
 import { RelayCamera } from "@/components/RelayCamera";
 import { Button } from "@/components/ui/button";
 import { useCamera } from "@/hooks/useCamera";
@@ -18,9 +18,9 @@ export function LiveCamera({ printer, size = "page" }: { printer: Printer; size?
   return <DirectCamera printer={printer} />;
 }
 
-/** Direct WebRTC from the printer: video plus start / stop controls. */
+/** Direct WebRTC from the printer: video plus a start button. */
 function DirectCamera({ printer }: { printer: Printer }) {
-  const { state, error, stream, start, stop } = useCamera(printer.id);
+  const { state, error, stream, start } = useCamera(printer.id);
   const video = React.useRef<HTMLVideoElement>(null);
 
   React.useEffect(() => {
@@ -45,12 +45,7 @@ function DirectCamera({ printer }: { printer: Printer }) {
         aria-label={`${printer.name} live camera`}
       />
       {state === "live" ? (
-        <>
-          <span className="absolute top-3 left-3 rounded-md bg-background px-2 py-0.5 text-xs font-medium text-red-600">● Live</span>
-          <Button variant="outline" size="sm" onClick={stop} className="absolute top-2.5 right-2.5 bg-background/90">
-            <Square /> Stop
-          </Button>
-        </>
+        <span className="absolute top-3 left-3 rounded-md bg-background px-2 py-0.5 text-xs font-medium text-red-600">● Live</span>
       ) : (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-stage px-6 text-center">
           {state === "error" && <p className="m-0 max-w-sm text-sm text-muted-foreground">{error}</p>}
