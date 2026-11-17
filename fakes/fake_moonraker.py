@@ -297,6 +297,14 @@ class FakeMoonraker:
             except Exception:
                 pass
 
+    async def notify(self, method: str, params: list) -> None:
+        """Send a bare notification (e.g. notify_filelist_changed) to every client."""
+        for ws in list(self._subs):
+            try:
+                await ws.send_text(json.dumps({"jsonrpc": "2.0", "method": method, "params": params}))
+            except Exception:
+                pass
+
     async def ticker(self) -> None:
         while True:
             await asyncio.sleep(self.tick_seconds)

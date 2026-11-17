@@ -128,3 +128,22 @@ async def test_unreachable_printer_is_offline_and_waits():
 def test_default_reconnect_is_30_seconds():
     cfg = PrinterConfig(id="k1c", name="K1C", host="127.0.0.1")
     assert MoonrakerDriver(cfg).reconnect_seconds == 30.0
+
+
+async def test_file_notices_are_only_logged(fake_server, caplog):
+    driver = make_driver(fake_server.port)
+    driver.start()
+    try:
+        await wait_for(lambda: driver.status.state == "printing")
+        sent_before = list(fake_server.fake.methods)
+        caplog.set_level("INFO", logger="app.drivers.moonraker")
+        params = [{"action": "create_file", "item": {"root": "gcodes", "path": "rail_B.gcode", "size": 1234}}]
+        await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(
+            fake_server.fake.notify("notify_filelist_changed", params), fake_server.loop))
+        await wait_for(lambda: "notify_filelist_changed" in caplog.text)
+        assert "rail_B.gcode" in caplog.text
+        assert driver.status.state == "printing"
+        assert fake_server.fake.methods == sent_before  # nothing asked of the printer
+        assert fake_server.fake.http_requests == []
+    finally:
+        await driver.stop()
