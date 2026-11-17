@@ -16,6 +16,15 @@ function gatheringDone(pc: RTCPeerConnection, ms = 5000): Promise<void> {
   });
 }
 
+/** Video frames decoded so far on this connection. */
+async function framesDecoded(pc: RTCPeerConnection): Promise<number> {
+  let n = 0;
+  (await pc.getStats()).forEach((r) => {
+    if (r.type === "inbound-rtp" && r.kind === "video") n += r.framesDecoded ?? 0;
+  });
+  return n;
+}
+
 /**
  * Live camera over WebRTC. Starts only when asked, stops when the tab is
  * hidden or the page closes. The server only relays the handshake; video
@@ -38,14 +47,18 @@ export function useCamera(printerId: string) {
     pcRef.current?.close();
     setError(null);
     setState("connecting");
-    const pc = new RTCPeerConnection({ iceServers: [] });
+    // Same STUN server as the K1C's own page. Without it Safari (and other
+    // browsers) only offer hidden ".local" addresses, which the printer
+    // can't resolve, so it has nowhere to send the video.
+    const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
     pcRef.current = pc;
     // The K1C only sends video when the offer is sendrecv, exactly as its own
     // page at :8000 does it. Nothing is ever sent from this side.
     pc.addTransceiver("video", { direction: "sendrecv" });
+    // A track arrives as soon as the printer agrees to send video, before any
+    // frames do. Attach it, but only call it live once frames are decoded.
     pc.ontrack = (e) => {
       setStream(e.streams[0] ?? new MediaStream([e.track]));
-      setState("live");
     };
     pc.onconnectionstatechange = () => {
       if (pcRef.current !== pc) return;
@@ -75,15 +88,27 @@ export function useCamera(printerId: string) {
       } catch (e) {
         throw new Error(`The camera's answer couldn't be used (${e instanceof Error ? e.message : e}).`);
       }
-      // If no video arrives soon, say so instead of spinning forever.
-      window.setTimeout(() => {
-        if (pcRef.current === pc && pc.connectionState !== "connected") {
-          setError("No video arrived from the camera.");
+      // Live only once frames are decoded; if none arrive soon, say why.
+      const started = Date.now();
+      const poll = window.setInterval(async () => {
+        if (pcRef.current !== pc) return window.clearInterval(poll);
+        if ((await framesDecoded(pc)) > 0) {
+          window.clearInterval(poll);
+          setState("live");
+        } else if (Date.now() - started > 15000) {
+          window.clearInterval(poll);
+          const connected = pc.connectionState === "connected";
+          setError(
+            connected
+              ? "Connected to the camera, but no video frames arrived."
+              : "No video arrived from the camera (the connection never opened).",
+          );
           setState("error");
           pc.close();
           pcRef.current = null;
+          setStream(null);
         }
-      }, 15000);
+      }, 500);
     } catch (e) {
       if (pcRef.current !== pc) return;
       pc.close();
