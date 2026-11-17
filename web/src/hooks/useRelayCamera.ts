@@ -26,7 +26,6 @@ export function useRelayCamera(printerId: string, enabled: boolean) {
   const [state, setState] = React.useState<CameraState>("idle");
   const [error, setError] = React.useState<string | null>(null);
   const [visible, setVisible] = React.useState(() => document.visibilityState === "visible");
-  const [stopped, setStopped] = React.useState(false);
   const [attempt, setAttempt] = React.useState(0);
   const videoRef = React.useRef<HTMLVideoElement>(null);
 
@@ -36,7 +35,7 @@ export function useRelayCamera(printerId: string, enabled: boolean) {
     return () => document.removeEventListener("visibilitychange", onVis);
   }, []);
 
-  const run = enabled && visible && !stopped && error === null;
+  const run = enabled && visible && error === null;
 
   React.useEffect(() => {
     const video = videoRef.current;
@@ -173,10 +172,8 @@ export function useRelayCamera(printerId: string, enabled: boolean) {
 
   const retry = React.useCallback(() => {
     setError(null);
-    setStopped(false);
     setAttempt((n) => n + 1);
   }, []);
-  const stop = React.useCallback(() => setStopped(true), []);
 
-  return { state: stopped ? ("idle" as const) : state, error, stopped, videoRef, retry, stop };
+  return { state, error, videoRef, retry };
 }

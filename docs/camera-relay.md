@@ -96,8 +96,8 @@ camera only starts when you tap.
 
 - **Auto-start.** The camera starts by itself on the printer page and on the
   dashboard cards when the printer is online. It stops when the tab is hidden
-  and starts again when the tab comes back. **Stop** on the printer page turns
-  it off for that page.
+  and starts again when the tab comes back. There is no Stop button; leave the
+  page or hide the tab to stop it.
 - **No automatic retries from the page.** If the camera fails, the page says
   why and shows **Try again**. go2rtc may retry a dropped stream while someone
   is still watching, but every attempt goes through printer-api's rate limit,
