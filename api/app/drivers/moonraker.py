@@ -31,7 +31,7 @@ CONTROL_METHODS = frozenset({"printer.print.pause", "printer.print.resume", "pri
                              "printer.gcode.script"})
 # The only G-code this driver will ever send, whole-line matches.
 ALLOWED_GCODE = tuple(re.compile(p) for p in (
-    r"M220 S([5-9]0|1[0-5]0|160)",  # 50-160 in steps of 10
+    r"M220 S([2-9]0|1[0-5]0|160)",  # 20-160 in steps of 10
     r"M104 S(0|[3-9][0-9]|[12][0-9]{2}|300)",
     r"M140 S(0|[3-9][0-9]|100)",
     r"M106 S([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])",

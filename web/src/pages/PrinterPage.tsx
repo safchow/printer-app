@@ -1,3 +1,4 @@
+import * as React from "react";
 import { Link, useParams } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import { CameraStage } from "@/components/CameraStage";
@@ -14,9 +15,19 @@ import { useIsMobile } from "@/hooks/useMediaQuery";
 import { useActions, type ActionRow } from "@/hooks/useActions";
 import { useControl } from "@/hooks/useControl";
 import { usePrinters } from "@/hooks/usePrinters";
-import { dayAndClock, duration, isActive, temp } from "@/lib/format";
+import { clock, dayAndClock, duration, isActive, temp } from "@/lib/format";
 import type { Printer } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+// three.js is big: load the 3D preview only when the printer page shows it.
+const LazyPreview = React.lazy(() => import("@/components/GcodePreview").then((m) => ({ default: m.GcodePreview })));
+function GcodePreview(props: { p: Printer; className?: string }) {
+  return (
+    <React.Suspense fallback={<div className={props.className} />}>
+      <LazyPreview {...props} />
+    </React.Suspense>
+  );
+}
 
 function bars(p: Printer) {
   const file = p.progress != null ? p.progress * 100 : null;
@@ -32,52 +43,78 @@ function remaining(p: Printer): number | null {
   return (new Date(p.eta_at).getTime() - Date.now()) / 1000;
 }
 
-function StatusNote({ p }: { p: Printer }) {
+function StatusNote({ p, className }: { p: Printer; className?: string }) {
   if (p.state === "offline" || p.state === "connecting") {
     return (
-      <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
+      <div className={cn("rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground", className)}>
         {p.last_seen ? `Last seen ${dayAndClock(p.last_seen)}` : "Not reached yet"}. Checking again every {Math.round(p.reconnect_seconds)} seconds.
       </div>
     );
   }
   if (p.state === "error") {
-    return <div className="rounded-lg bg-offline px-4 py-3 text-sm text-offline-foreground">{p.message ?? "The printer reported an error."}</div>;
+    return <div className={cn("rounded-lg bg-offline px-4 py-3 text-sm text-offline-foreground", className)}>{p.message ?? "The printer reported an error."}</div>;
   }
   return null;
 }
 
-function ProgressBody({ p, big = "text-4xl" }: { p: Printer; big?: string }) {
+/** Started and done-at times, under the progress bars. */
+function Times({ p, size = "text-[15px]" }: { p: Printer; size?: string }) {
+  const paused = p.state === "paused";
+  const done = p.state === "complete";
+  return (
+    <div className="flex items-end justify-between leading-tight">
+      <div className="flex flex-col">
+        <span className="text-[11px] text-muted-foreground">Started</span>
+        <span className={cn("font-mono font-semibold", size)}>{clock(p.started_at)}</span>
+      </div>
+      <div className="flex flex-col text-right">
+        <span className="text-[11px] text-muted-foreground">{paused ? "Paused" : done ? "Finished" : "Done at"}</span>
+        <span className={cn("font-mono font-semibold", size)}>{paused ? "On hold" : clock(p.eta_at)}</span>
+      </div>
+    </div>
+  );
+}
+
+/** Desktop progress card: fills the column beside the camera, top to bottom. */
+function ProgressColumn({ p }: { p: Printer }) {
   const active = isActive(p) || p.state === "complete";
   if (!active) {
-    return <p className="m-0 text-sm text-muted-foreground">{p.state === "idle" ? "Not printing." : p.filename ? `Last: ${p.filename}` : "No job."}</p>;
+    return (
+      <>
+        <CardTitle>Progress</CardTitle>
+        <p className="m-0 text-sm text-muted-foreground">{p.state === "idle" ? "Not printing." : p.filename ? `Last: ${p.filename}` : "No job."}</p>
+      </>
+    );
   }
+  const left = p.state === "printing" ? remaining(p) : null;
   return (
     <>
-      <div className="flex items-end justify-between">
+      <div className="flex flex-col gap-2">
         <CardTitle>Progress</CardTitle>
-        <div className={cn("font-mono leading-none font-bold", big)}>{Math.round((p.progress ?? 0) * 100)}%</div>
+        <div className="font-mono text-[44px] leading-none font-bold tracking-tight">{Math.round((p.progress ?? 0) * 100)}%</div>
       </div>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="flex flex-col gap-4">
         {bars(p).map((b) => (
           <div key={b.k} className="flex flex-col gap-2">
-            <div className="flex justify-between text-[13px]">
-              <span className="text-muted-foreground">{b.k}</span>
+            <div className="flex justify-between gap-2 text-[13px]">
+              <span className="truncate text-muted-foreground">{b.k}</span>
               <span className="font-mono">{b.v == null ? "--" : `${b.v.toFixed(1)}%`}</span>
             </div>
             <Progress value={b.v} className="h-1.5" />
           </div>
         ))}
         <div className="flex flex-col gap-2">
-          <div className="flex justify-between text-[13px]">
+          <div className="flex justify-between gap-2 text-[13px]">
             <span className="text-muted-foreground">Time</span>
-            <span className="font-mono">
+            <span className="truncate font-mono">
               {duration(p.print_duration)}
-              {p.state === "printing" && remaining(p) != null && <span className="text-muted-foreground"> · {duration(remaining(p))} left</span>}
+              {left != null && <span className="text-muted-foreground"> · {duration(left)} left</span>}
             </span>
           </div>
           <Progress value={(p.progress ?? 0) * 100} className="h-1.5" />
         </div>
       </div>
+      <Times p={p} size="text-base" />
     </>
   );
 }
@@ -101,25 +138,40 @@ function Desktop({ p, ctl, rows }: { p: Printer; ctl: Ctl; rows: ActionRow[] }) 
           <ThemePicker />
         </div>
       </header>
-      <main className="mx-auto flex max-w-[1360px] flex-wrap items-start gap-5 px-8 pt-6 pb-12">
-        <section className="flex min-w-0 flex-[999_1_620px] flex-col gap-5">
-          <StatusNote p={p} />
-          <CameraStage printer={p} className="aspect-video rounded-xl border">
-            <LiveCamera printer={p} />
-          </CameraStage>
-          <Card className="flex flex-col gap-4.5 p-6">
-            <ProgressBody p={p} />
-          </Card>
-        </section>
-        <aside className="flex min-w-0 flex-[1_1_380px] flex-col gap-4">
-          <ErrorLine ctl={ctl} />
-          <SpeedCard p={p} ctl={ctl} />
-          <FansCard p={p} ctl={ctl} />
-          <TempCard p={p} ctl={ctl} />
-          <LightCard p={p} ctl={ctl} />
-          {!ctl.enabled && <p className="m-0 text-xs text-muted-foreground">{CONTROLS_OFF}</p>}
-          <ActivityCard rows={rows} />
-        </aside>
+      {/*
+        Layout B, sized to the window so it fits a 14" laptop without scrolling:
+        camera + progress (with the speed slider) on top; under them the 3D preview,
+        fans, temperature, and light + activity. 24 px between everything.
+      */}
+      <main className="mx-auto flex h-[calc(100dvh-4rem)] min-h-[720px] w-full max-w-[1440px] flex-col gap-6 p-6">
+        <StatusNote p={p} />
+        <ErrorLine ctl={ctl} />
+        <div className="grid min-h-0 flex-1 grid-cols-[repeat(4,minmax(0,1fr))] grid-rows-[minmax(0,1.35fr)_minmax(0,1fr)] gap-6">
+        <CameraStage printer={p} className="col-span-3 h-full min-h-0 rounded-xl border">
+          <LiveCamera printer={p} />
+        </CameraStage>
+        <Card className="flex min-h-0 flex-col justify-between gap-4 overflow-hidden p-6">
+          <ProgressColumn p={p} />
+          <div className="border-t pt-4">
+            <SpeedCard p={p} ctl={ctl} bare />
+          </div>
+        </Card>
+        <Card className="flex min-h-0 flex-col gap-3 overflow-hidden p-0">
+          <div className="flex items-baseline justify-between px-6 pt-5">
+            <CardTitle>Model</CardTitle>
+            <span className="text-[11px] text-muted-foreground">drag to turn</span>
+          </div>
+          <GcodePreview p={p} className="min-h-0 flex-1" />
+        </Card>
+        <FansCard p={p} ctl={ctl} className="min-h-0 gap-5 overflow-hidden p-6" />
+        <TempCard p={p} ctl={ctl} className="min-h-0 gap-5 overflow-hidden p-6" stacked />
+        <Card className="flex min-h-0 flex-col gap-4 overflow-hidden p-6">
+          <LightCard p={p} ctl={ctl} bare />
+          <div className="border-t" />
+          <ActivityCard rows={rows} bare empty={ctl.enabled ? "No actions yet." : "Controls are off."} />
+        </Card>
+        </div>
+        {!ctl.enabled && <p className="m-0 -mt-3 text-xs text-muted-foreground">{CONTROLS_OFF}</p>}
       </main>
     </div>
   );
@@ -182,6 +234,10 @@ function Mobile({ p, ctl, rows }: { p: Printer; ctl: Ctl; rows: ActionRow[] }) {
                     {p.state === "printing" && remaining(p) != null && ` · ${duration(remaining(p))} left`}
                   </span>
                 </div>
+                <Times p={p} />
+              </Card>
+              <Card className="h-[240px] overflow-hidden p-0">
+                <GcodePreview p={p} className="h-full" />
               </Card>
             </>
           ) : (

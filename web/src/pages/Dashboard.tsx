@@ -8,7 +8,7 @@ import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { useIsMobile } from "@/hooks/useMediaQuery";
 import { usePrinters } from "@/hooks/usePrinters";
-import { clock, dayAndClock, isActive, summary, temp } from "@/lib/format";
+import { clock, dayAndClock, isActive, summary } from "@/lib/format";
 import type { Printer } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -53,10 +53,10 @@ function PrinterCard({ printer: p }: { printer: Printer }) {
           {active && <div className="font-mono text-2xl font-semibold">{Math.round((p.progress ?? 0) * 100)}%</div>}
         </div>
         {active && <Progress value={(p.progress ?? 0) * 100} barClassName={p.state === "paused" ? "bg-amber-500" : undefined} />}
-        {!offline && (
+        {active && (
           <div className="font-mono text-[13px] text-muted-foreground">
-            Nozzle {temp(p.nozzle.current)} · Bed {temp(p.bed.current)}
-            {active && p.speed_percent != null && ` · Speed ${p.speed_percent}%`}
+            Speed {p.speed_percent ?? "--"}%
+            {p.state === "printing" && p.eta_at && ` · Done ${clock(p.eta_at)}`}
           </div>
         )}
       </div>
@@ -75,7 +75,7 @@ function MobileRow({ printer: p }: { printer: Printer }) {
       <span className="min-w-0 flex-1">
         <span className="block text-[15px] font-semibold">{p.name}</span>
         <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-          {offline ? (p.last_seen ? `Last seen ${dayAndClock(p.last_seen)}` : "Not reached yet") : `${subline(p)} · ${temp(p.nozzle.current)}`}
+          {offline ? (p.last_seen ? `Last seen ${dayAndClock(p.last_seen)}` : "Not reached yet") : subline(p)}
         </span>
       </span>
       <StateBadge state={p.state} />
@@ -103,8 +103,8 @@ function MobileBigCard({ printer: p }: { printer: Printer }) {
         </div>
         <Progress value={(p.progress ?? 0) * 100} barClassName={p.state === "paused" ? "bg-amber-500" : undefined} />
         <div className="font-mono text-[13px] text-muted-foreground">
-          {temp(p.nozzle.current)} · {temp(p.bed.current)} · {p.speed_percent ?? "--"}%
-          {p.state === "printing" && ` · done ${clock(p.eta_at)}`}
+          Speed {p.speed_percent ?? "--"}%
+          {p.state === "printing" && p.eta_at && ` · Done ${clock(p.eta_at)}`}
         </div>
       </div>
     </Link>

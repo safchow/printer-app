@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
-import type { ActionRow } from "@/hooks/useActions";
+import { ACTIVITY_LIMIT, type ActionRow } from "@/hooks/useActions";
 import type { useControl } from "@/hooks/useControl";
 import { clock, isActive } from "@/lib/format";
 import type { Printer } from "@/lib/types";
@@ -72,34 +72,42 @@ function Shell({ bare, className, children }: { bare?: boolean; className?: stri
   return bare ? <div className={cn("flex flex-col", className)}>{children}</div> : <Card className={cn("flex flex-col p-5", className)}>{children}</Card>;
 }
 
-export function SpeedCard({ p, ctl, bare }: { p: Printer; ctl: Ctl; bare?: boolean }) {
+export function SpeedCard({ p, ctl, bare, className, scale }: { p: Printer; ctl: Ctl; bare?: boolean; className?: string; scale?: boolean }) {
   const can = ctl.enabled && isActive(p) && !ctl.busy;
   return (
-    <Shell bare={bare} className="gap-3">
+    <Shell bare={bare} className={cn("gap-3", className)}>
       <div className="flex items-baseline justify-between">
         <CardTitle>Print speed</CardTitle>
         <span className="font-mono text-xl font-semibold">{p.speed_percent ?? "--"}%</span>
       </div>
-      <Gate ctl={ctl} className="w-full">
-        <Slider
-          label="Print speed"
-          value={p.speed_percent}
-          min={50}
-          max={160}
-          step={10}
-          disabled={!can}
-          onCommit={(percent) => ctl.run("speed", { percent })}
-        />
-      </Gate>
+      <div className="flex flex-col gap-1">
+        <Gate ctl={ctl} className="w-full">
+          <Slider
+            label="Print speed"
+            value={p.speed_percent}
+            min={20}
+            max={160}
+            step={10}
+            disabled={!can}
+            onCommit={(percent) => ctl.run("speed", { percent })}
+          />
+        </Gate>
+        {scale && (
+          <div className="flex justify-between font-mono text-[11px] text-muted-foreground">
+            <span>20%</span>
+            <span>160%</span>
+          </div>
+        )}
+      </div>
       {ctl.enabled && !isActive(p) && <p className="m-0 text-xs text-muted-foreground">Speed can be changed during a print.</p>}
     </Shell>
   );
 }
 
-export function FansCard({ p, ctl, bare }: { p: Printer; ctl: Ctl; bare?: boolean }) {
+export function FansCard({ p, ctl, bare, className }: { p: Printer; ctl: Ctl; bare?: boolean; className?: string }) {
   const can = ctl.enabled && !offline(p) && !ctl.busy;
   return (
-    <Shell bare={bare} className="gap-3.5">
+    <Shell bare={bare} className={cn("gap-3.5", className)}>
       <CardTitle>Fans</CardTitle>
       {p.fans.length === 0 && <p className="m-0 text-sm text-muted-foreground">No fan data from this printer.</p>}
       {p.fans.map((f) => (
@@ -125,7 +133,23 @@ export function FansCard({ p, ctl, bare }: { p: Printer; ctl: Ctl; bare?: boolea
   );
 }
 
-function TempRow({ name, heater, t, p, ctl, max }: { name: string; heater: "nozzle" | "bed"; t: Printer["nozzle"]; p: Printer; ctl: Ctl; max: number }) {
+function TempRow({
+  name,
+  heater,
+  t,
+  p,
+  ctl,
+  max,
+  stacked,
+}: {
+  name: string;
+  heater: "nozzle" | "bed";
+  t: Printer["nozzle"];
+  p: Printer;
+  ctl: Ctl;
+  max: number;
+  stacked?: boolean;
+}) {
   const [draft, setDraft] = React.useState("");
   const can = ctl.enabled && !offline(p) && !ctl.busy;
   const n = Number(draft);
@@ -134,46 +158,69 @@ function TempRow({ name, heater, t, p, ctl, max }: { name: string; heater: "nozz
     if (!valid) return;
     if (await ctl.run("temp", { heater, target: n }, `temp:${heater}`)) setDraft("");
   };
+  const onSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    void send();
+  };
+  const input = (
+    <Gate ctl={ctl} className={stacked ? "min-w-0 flex-1" : undefined}>
+      <input
+        inputMode="numeric"
+        aria-label={`${name} target, 0 or 30 to ${max} degrees`}
+        placeholder={t.target == null ? "°" : `${Math.round(t.target)}°`}
+        value={draft}
+        disabled={!can}
+        onChange={(e) => setDraft(e.target.value.replace(/[^0-9]/g, "").slice(0, 3))}
+        className={cn(
+          "h-9 rounded-md border bg-background px-2 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
+          stacked ? "w-full min-w-0 flex-1" : "w-16",
+        )}
+      />
+    </Gate>
+  );
+  const button = (
+    <Gate ctl={ctl}>
+      <Button type="submit" variant="secondary" size="sm" className={stacked ? "h-9" : undefined} disabled={!can || !valid}>
+        Set
+      </Button>
+    </Gate>
+  );
+  if (stacked) {
+    return (
+      <form className="flex flex-col gap-2" onSubmit={onSubmit}>
+        <div className="flex items-baseline justify-between gap-2 text-sm">
+          <span>{name}</span>
+          <span className="font-mono text-xs text-muted-foreground">
+            {t.current == null ? "--" : `${Math.round(t.current)}°`} → {t.target == null ? "--" : `${Math.round(t.target)}°`}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          {input}
+          {button}
+        </div>
+      </form>
+    );
+  }
   return (
-    <form
-      className="flex items-center gap-2.5"
-      onSubmit={(e) => {
-        e.preventDefault();
-        void send();
-      }}
-    >
+    <form className="flex items-center gap-2.5" onSubmit={onSubmit}>
       <div className="flex-1">
         <div className="text-sm">{name}</div>
         <div className="font-mono text-xs text-muted-foreground">
           now {t.current == null ? "--" : `${t.current.toFixed(1)}°`} · target {t.target == null ? "--" : `${Math.round(t.target)}°`}
         </div>
       </div>
-      <Gate ctl={ctl}>
-        <input
-          inputMode="numeric"
-          aria-label={`${name} target, 0 or 30 to ${max} degrees`}
-          placeholder={t.target == null ? "°" : `${Math.round(t.target)}°`}
-          value={draft}
-          disabled={!can}
-          onChange={(e) => setDraft(e.target.value.replace(/[^0-9]/g, "").slice(0, 3))}
-          className="h-9 w-16 rounded-md border bg-background px-2 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-        />
-      </Gate>
-      <Gate ctl={ctl}>
-        <Button type="submit" variant="secondary" size="sm" disabled={!can || !valid}>
-          Set
-        </Button>
-      </Gate>
+      {input}
+      {button}
     </form>
   );
 }
 
-export function TempCard({ p, ctl, bare }: { p: Printer; ctl: Ctl; bare?: boolean }) {
+export function TempCard({ p, ctl, bare, className, stacked }: { p: Printer; ctl: Ctl; bare?: boolean; className?: string; stacked?: boolean }) {
   return (
-    <Shell bare={bare} className="gap-3">
+    <Shell bare={bare} className={cn("gap-3", className)}>
       <CardTitle>Temperature</CardTitle>
-      <TempRow name="Nozzle" heater="nozzle" t={p.nozzle} p={p} ctl={ctl} max={300} />
-      <TempRow name="Bed" heater="bed" t={p.bed} p={p} ctl={ctl} max={100} />
+      <TempRow name="Nozzle" heater="nozzle" t={p.nozzle} p={p} ctl={ctl} max={300} stacked={stacked} />
+      <TempRow name="Bed" heater="bed" t={p.bed} p={p} ctl={ctl} max={100} stacked={stacked} />
       <p className="m-0 text-xs text-muted-foreground">0 turns a heater off. Nozzle up to 300°, bed up to 100°.</p>
     </Shell>
   );
@@ -277,13 +324,15 @@ function describe(r: ActionRow): string {
   }
 }
 
-export function ActivityCard({ rows, bare }: { rows: ActionRow[]; bare?: boolean }) {
-  if (rows.length === 0) return null;
+export function ActivityCard({ rows, bare, empty }: { rows: ActionRow[]; bare?: boolean; empty?: string }) {
+  if (rows.length === 0 && !empty) return null;
   return (
     <Shell bare={bare} className="gap-2.5">
       <CardTitle>Activity</CardTitle>
+      {rows.length === 0 && <p className="m-0 text-[13px] text-muted-foreground">{empty}</p>}
+      {rows.length > 0 && (
       <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
-        {rows.map((r) => (
+        {rows.slice(0, ACTIVITY_LIMIT).map((r) => (
           <li key={r.id} className="flex items-baseline justify-between gap-3 text-[13px]">
             <span className="min-w-0 truncate">
               {describe(r)}
@@ -301,6 +350,7 @@ export function ActivityCard({ rows, bare }: { rows: ActionRow[]; bare?: boolean
           </li>
         ))}
       </ul>
+      )}
     </Shell>
   );
 }

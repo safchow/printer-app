@@ -81,7 +81,7 @@ sends exactly one fixed command. On Moonraker printers:
 | Control | Command | Allowed |
 | --- | --- | --- |
 | Pause / Resume / Stop | `printer.print.pause` / `resume` / `cancel`, or the `PAUSE` / `RESUME` / `CANCEL_PRINT` macros if the printer's Moonraker lacks those methods | while printing or paused |
-| Speed | `M220 S50` to `S160`, steps of 10 | while printing or paused |
+| Speed | `M220 S20` to `S160`, steps of 10 | while printing or paused |
 | Fans | `SET_FAN_SPEED FAN=<name> SPEED=0..1`, steps of 10% | while online |
 | Nozzle / bed | `M104 S<°C>` / `M140 S<°C>`: 0, or 30 to 300 (nozzle) / 100 (bed) | while online |
 | Light | `SET_PIN PIN=<pin> VALUE=0/1` | while online |
@@ -93,6 +93,19 @@ second, and never retries one. Nothing is sent while the printer is offline.
 Every press, including refused ones, goes into the action log. The printer
 page shows the last 20 presses, and `GET /api/printers/{id}/actions` returns
 the full history.
+
+## 3D preview of the print
+
+Under the camera, the printer page draws the toolpath of the file being
+printed in 3D, with the printed part in the accent colour and a dot where the
+nozzle is. Drag to turn it, scroll to zoom.
+
+To do that, printer-api downloads the G-code being printed from the printer's
+Moonraker (`GET /server/files/gcodes/<file>`) **once per print**, when it first
+sees the print. It never retries, even if the download fails, keeps the file in
+`DATA_DIR/gcode/<printer>/` (so a restart doesn't fetch it again), and caps it
+at 200 MB. Browsers get it from printer-api, never from the printer. Set
+`GCODE_PREVIEW=false` to turn this off.
 
 ## Setup
 
@@ -173,6 +186,7 @@ changing a table in `api/app/db.py`, add a migration with
 | `PRINTERS_FILE` | Which printers file to mount | `./printers.yaml` |
 | `TZ` | Time zone for times in the app | `UTC` |
 | `CONTROLS_ENABLED` | Turns on the printer controls | `false` |
+| `GCODE_PREVIEW` | Fetch the current print's G-code once per print for the 3D preview | `true` |
 | `CAMERA_MIN_INTERVAL` | Seconds between camera handshakes per printer | `5` |
 | `GO2RTC_URL` | Camera relay address; empty turns the relay off (direct mode) | `http://go2rtc:1984` |
 | `PUID` / `PGID` | User the container runs as | `1000` |

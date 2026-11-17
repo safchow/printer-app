@@ -22,6 +22,7 @@ from .db import make_engine, migrate
 from .drivers import PrinterStatus
 from .controls import Controls
 from .drivers.base import ControlError, ControlsDisabled
+from .gcode import GcodeCache
 from .hub import Hub
 from .relay import Go2rtc, decode_go2rtc_offer, encode_answer, fix_answer, fix_offer, pump
 
@@ -60,6 +61,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         for driver in hub.drivers.values():
             driver.controls_enabled = settings.controls_enabled
         app.state.controls = Controls(engine, settings.controls_enabled)
+        app.state.gcode = GcodeCache(settings.data_dir, {d.config.id: d.config for d in hub.drivers.values()})
+        if settings.gcode_preview:
+            for driver in hub.drivers.values():
+                driver.on_status(app.state.gcode.on_status)
         app.state.camera = CameraRelay(min_interval=settings.camera_min_interval)
         app.state.go2rtc = (Go2rtc(settings.go2rtc_url, settings.camera_callback_url, settings.data_dir)
                             if settings.go2rtc_url else None)
@@ -68,6 +73,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             yield
         finally:
             await hub.stop()
+            await app.state.gcode.stop()
             engine.dispose()
 
     app = FastAPI(title="printer-api", version=VERSION, description=about, lifespan=lifespan)
@@ -95,6 +101,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not driver:
             raise HTTPException(404, "no such printer")
         return driver.status
+
+    # --- the current print's G-code, for the 3D preview (app/gcode.py has the rules) ---
+
+    @app.get("/api/printers/{printer_id}/gcode/info")
+    def gcode_info(printer_id: str) -> dict:
+        driver = hub_of().get(printer_id)
+        if not driver:
+            raise HTTPException(404, "no such printer")
+        if not settings.gcode_preview:
+            return {"state": "off"}
+        return app.state.gcode.info(driver.status)
+
+    @app.get("/api/printers/{printer_id}/gcode")
+    def gcode_file(printer_id: str) -> FileResponse:
+        driver = hub_of().get(printer_id)
+        if not driver:
+            raise HTTPException(404, "no such printer")
+        if not settings.gcode_preview or not app.state.gcode.ready(driver.status):
+            raise HTTPException(404, "no G-code for the current print")
+        return FileResponse(app.state.gcode.path(printer_id), media_type="text/plain",
+                            headers={"Cache-Control": "no-store"})
 
     # --- controls (app/controls.py has the rules) ---
 

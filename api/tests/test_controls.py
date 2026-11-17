@@ -58,7 +58,7 @@ def test_falls_back_to_macros_when_print_methods_are_missing(client, fake_server
 def test_speed_slider(client, fake_server):
     assert post(client, "speed", {"percent": 70}).json()["command"] == "M220 S70"
     wait_for_sync(lambda: status(client)["speed_percent"] == 70)
-    for bad in (40, 75, 170):
+    for bad in (10, 75, 170):
         assert post(client, "speed", {"percent": bad}).status_code == 422
     assert fake_server.fake.scripts == ["M220 S70"]
 
@@ -119,13 +119,13 @@ def test_action_log(client, fake_server):
     rows = client.get("/api/printers/k1c/actions").json()
     assert [(r["action"], r["result"]) for r in rows] == [("speed", "refused"), ("light", "sent")]
     assert rows[1]["command"] == "SET_PIN PIN=LED VALUE=1" and rows[1]["device"]
-    assert "50 to 160" in rows[0]["detail"]
+    assert "20 to 160" in rows[0]["detail"]
 
 
 def test_gcode_allowlist():
-    for ok in ("M220 S50", "M220 S160", "M104 S0", "M104 S300", "M140 S100", "PAUSE",
+    for ok in ("M220 S20", "M220 S50", "M220 S160", "M104 S0", "M104 S300", "M140 S100", "PAUSE",
                "SET_FAN_SPEED FAN=model_fan SPEED=0.4", "SET_PIN PIN=LED VALUE=1"):
         assert gcode_allowed(ok), ok
-    for bad in ("M220 S170", "M220 S105", "M104 S301", "M140 S101", "G28", "M112", "PAUSE\nG28",
+    for bad in ("M220 S10", "M220 S170", "M220 S105", "M104 S301", "M140 S101", "G28", "M112", "PAUSE\nG28",
                 "SET_PIN PIN=LED VALUE=1 G28", "SET_FAN_SPEED FAN=model_fan SPEED=0.45", "FIRMWARE_RESTART"):
         assert not gcode_allowed(bad), bad
