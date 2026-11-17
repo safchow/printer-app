@@ -66,7 +66,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             driver.controls_enabled = settings.controls_enabled
         app.state.controls = Controls(engine, settings.controls_enabled)
         configs = {d.config.id: d.config for d in hub.drivers.values()}
-        library = Library(engine, settings.library_root, configs) if settings.capture_files else None
+        library = None
+        if settings.capture_files:
+            try:
+                library = Library(engine, settings.library_root, configs)
+            except OSError as exc:  # e.g. a library folder the app can't write to: run without capture
+                log.error("file capture is off: can't use %s (%s)", settings.library_root, exc)
         app.state.library = library
         app.state.gcode = GcodeCache(settings.data_dir, configs, library=library)
         for driver in hub.drivers.values():
@@ -102,7 +107,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"version": VERSION, "tz": settings.tz, "controls_enabled": settings.controls_enabled,
                 "reconnect_seconds": settings.reconnect_seconds,
                 "camera_mode": "relay" if settings.go2rtc_url else "direct",
-                "capture_files": settings.capture_files}
+                "capture_files": bool(getattr(app.state, "library", None))}
 
     @app.get("/api/printers", response_model=list[PrinterStatus])
     def list_printers() -> list[PrinterStatus]:

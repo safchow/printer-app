@@ -16,6 +16,16 @@ export function GcodePreview(props: { p: Printer; className?: string; interactiv
   );
 }
 
+const LazyFileView = React.lazy(() => import("@/components/GcodePreview").then((m) => ({ default: m.GcodeFileView })));
+
+export function GcodeFileView(props: { url: string; className?: string; interactive?: boolean }) {
+  return (
+    <React.Suspense fallback={<div className={props.className} />}>
+      <LazyFileView {...props} />
+    </React.Suspense>
+  );
+}
+
 /**
  * The main view of a printer: the 3D model of the print, with the live camera
  * one tap away. The camera only connects while it is shown.

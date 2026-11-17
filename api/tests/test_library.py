@@ -142,3 +142,14 @@ def test_capture_off(tmp_path, printers_file, fake_server):
     with TestClient(create_app(s)) as c:
         assert c.get("/api/files").status_code == 404
         assert c.get("/api/config").json()["capture_files"] is False
+
+
+def test_unusable_library_folder_turns_capture_off(tmp_path, printers_file, fake_server):
+    blocker = tmp_path / "library"
+    blocker.write_text("not a folder")  # stands in for a folder the app can't write to
+    s = Settings(data_dir=tmp_path / "data", printers_file=printers_file, reconnect_seconds=0.3,
+                 static_dir=tmp_path / "none", library_root=blocker)
+    with TestClient(create_app(s)) as c:
+        wait_for_sync(lambda: c.get("/api/printers/k1c").json()["state"] == "printing")
+        assert c.get("/api/config").json()["capture_files"] is False
+        assert c.get("/api/files").status_code == 404

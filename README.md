@@ -2,10 +2,10 @@
 
 A private web app for watching and controlling 3D printers: a dashboard of
 every printer and a page per printer, on desktop and phone, with the printer's
-live camera and its controls, with a 3D view of each print. Next on the
-roadmap is file capture: the server keeps a copy of every file sent to the
-printer (from Creality Print as usual), sorts them with labels and records each
-print. The app doesn't upload or start prints; there is no upload flow.
+live camera and its controls, with a 3D view of each print. It also keeps a
+copy of every file you send to the printer (from Creality Print as usual), lets
+you sort them with labels and records each print. The app doesn't upload or
+start prints; there is no upload flow.
 
 It runs as one Docker Compose stack on any machine that can reach your
 printers, and is meant to be reached over a private network (Tailscale,
@@ -110,6 +110,32 @@ sees the print. It never retries, even if the download fails, keeps the file in
 at 200 MB. Browsers get it from printer-api, never from the printer. Set
 `GCODE_PREVIEW=false` to turn this off.
 
+## Files and history (file capture)
+
+When you send a file to the printer, Moonraker tells printer-api over the
+websocket it already has open (`notify_filelist_changed`). printer-api waits
+until the notices for that file have been quiet for 10 seconds (the first one
+comes while the file is still arriving, then the slicer's thumbnails), then
+downloads it from the printer **once** (`GET /server/files/gcodes/<file>`).
+Hidden folders such as `.thumbs/` are never fetched, and only `.gcode` and
+`.3mf` files are kept.
+
+- Files are stored by content (`LIBRARY_ROOT/files/<sha256>`), so sending the
+  same file again, even under a new name, is one entry that keeps its label.
+- New files land in the **Inbox** on the Files page. Give a file a label to
+  file it away; labels are made as you type them.
+- Time, material, colours, filament and layers come from the slicer's comment
+  header, plus its largest thumbnail.
+- Every copy is kept until you delete it in the app. Deleting a file on the
+  printer doesn't touch the app's copy, and deleting in the app doesn't touch
+  the printer.
+- The **History** page lists every print the app has seen start, with how it
+  ended, linked to its file. A file already captured is reused for the 3D
+  preview, so a print of it costs no download at all.
+
+Set `CAPTURE_FILES=false` to turn this off (the 3D preview then works as
+before).
+
 ## Setup
 
 1. `cp .env.example .env` and set `BIND_ADDRESS` to a private address the app
@@ -185,11 +211,12 @@ changing a table in `api/app/db.py`, add a migration with
 | `BIND_ADDRESS` | Private address the web app listens on | `127.0.0.1` |
 | `PORT` | Web port | `8090` |
 | `DATA_DIR` | Database | `./data` |
-| `LIBRARY_ROOT` | Captured print files (used from the file-capture version on) | `./library` |
+| `LIBRARY_ROOT` | Captured print files | `./library` |
 | `PRINTERS_FILE` | Which printers file to mount | `./printers.yaml` |
 | `TZ` | Time zone for times in the app | `UTC` |
 | `CONTROLS_ENABLED` | Turns on the printer controls | `false` |
 | `GCODE_PREVIEW` | Fetch the current print's G-code once per print for the 3D preview | `true` |
+| `CAPTURE_FILES` | Keep a copy of each file sent to the printer, and the print history | `true` |
 | `CAMERA_MIN_INTERVAL` | Seconds between camera handshakes per printer | `5` |
 | `GO2RTC_URL` | Camera relay address; empty turns the relay off (direct mode) | `http://go2rtc:1984` |
 | `PUID` / `PGID` | User the container runs as | `1000` |

@@ -369,6 +369,12 @@ class FakeMoonraker:
             await fake.go_offline(float(request.query_params.get("seconds", "60")))
             return JSONResponse({"offline_for": request.query_params.get("seconds", "60")})
 
+        async def upload(request: Request):
+            # Acts out a slicer sending a file (see upload()); for trying the Files page by hand.
+            body = await request.body()
+            asyncio.create_task(fake.upload(request.query_params["path"], body, float(request.query_params.get("gap", "0.5"))))
+            return JSONResponse({"uploading": request.query_params["path"], "size": len(body)})
+
         @contextlib.asynccontextmanager
         async def lifespan(app):
             task = asyncio.create_task(fake.ticker())
@@ -382,6 +388,7 @@ class FakeMoonraker:
             Route("/server/files/gcodes/{path:path}", gcode_file),
             Route("/fake/scenario/{name}", scenario, methods=["POST"]),
             Route("/fake/offline", offline, methods=["POST"]),
+            Route("/fake/upload", upload, methods=["POST"]),
             WebSocketRoute("/websocket", fake.handle_ws),
         ], lifespan=lifespan)
 

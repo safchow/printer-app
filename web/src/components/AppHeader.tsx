@@ -18,7 +18,8 @@ function Freshness() {
 }
 
 export function AppHeader() {
-  const soon = "pointer-events-none rounded-md px-3 py-2 text-sm text-muted-foreground/60";
+  const link = ({ isActive }: { isActive: boolean }) =>
+    cn("rounded-md px-3 py-2 text-sm no-underline", isActive ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground");
   return (
     <header className="flex min-h-16 flex-wrap items-center justify-between gap-3 border-b px-8 py-2.5">
       <div className="flex items-center gap-6">
@@ -29,17 +30,15 @@ export function AppHeader() {
           Printers
         </span>
         <nav aria-label="Main" className="flex gap-1">
-          <NavLink
-            to="/"
-            end
-            className={({ isActive }) =>
-              cn("rounded-md px-3 py-2 text-sm no-underline", isActive ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground")
-            }
-          >
+          <NavLink to="/" end className={link}>
             Dashboard
           </NavLink>
-          <span className={soon} title="Coming in a later update">Files</span>
-          <span className={soon} title="Coming in a later update">History</span>
+          <NavLink to="/files" className={link}>
+            Files
+          </NavLink>
+          <NavLink to="/history" className={link}>
+            History
+          </NavLink>
         </nav>
       </div>
       <div className="flex items-center gap-3">

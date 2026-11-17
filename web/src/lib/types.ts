@@ -47,4 +47,51 @@ export interface AppConfig {
   controls_enabled: boolean;
   reconnect_seconds: number;
   camera_mode?: "relay" | "direct";
+  capture_files?: boolean;
+}
+
+/** What the slicer wrote in a file's header (app/gcode_meta.py). */
+export interface FileMeta {
+  estimated_seconds?: number;
+  filament_type?: string[];
+  filament_colour?: string[];
+  filament_g?: number;
+  filament_mm?: number;
+  layer_height?: number;
+  layers?: number;
+  printer_model?: string;
+  slicer?: string;
+}
+
+export interface PrintJob {
+  id: number;
+  printer_id: string;
+  filename: string;
+  file_id: number | null;
+  started_at: string | null;
+  ended_at: string | null;
+  result: "printing" | "complete" | "cancelled" | "error" | "unknown";
+  print_duration: number | null;
+}
+
+export interface StoredFile {
+  id: number;
+  sha256: string;
+  filename: string;
+  size: number;
+  source: "printer" | "print" | "claude";
+  printer_id: string | null;
+  label: string | null;
+  meta: FileMeta;
+  thumbnail: boolean;
+  first_seen: string;
+  last_seen: string;
+  prints: number;
+  last_printed: string | null;
+  jobs?: PrintJob[];
+}
+
+export interface LabelCount {
+  name: string | null;
+  files: number;
 }

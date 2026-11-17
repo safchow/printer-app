@@ -78,3 +78,26 @@ export function summary(printers: Printer[]): string {
     .map(([n, label]) => `${n} ${label}`)
     .join(" · ");
 }
+
+/** "Today", "Yesterday" or "Mon 16 Nov", in the server's time zone. */
+export function dayHeading(iso: string | null | undefined): string {
+  if (!iso) return "Unknown day";
+  const key = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone }).format(d);
+  const d = new Date(iso);
+  if (key(d) === key(new Date())) return "Today";
+  if (key(d) === key(new Date(Date.now() - 86400000))) return "Yesterday";
+  return new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone }).format(d);
+}
+
+/** "16 Nov", or the time if it's today. */
+export function shortDay(iso: string | null | undefined): string {
+  if (!iso) return "never";
+  const key = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone }).format(d);
+  const d = new Date(iso);
+  if (key(d) === key(new Date())) return `today ${clock(iso)}`;
+  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone }).format(d);
+}
+
+export function dayKey(iso: string | null | undefined): string {
+  return iso ? new Intl.DateTimeFormat("en-CA", { timeZone }).format(new Date(iso)) : "";
+}

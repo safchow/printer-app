@@ -3,6 +3,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { PrintersProvider } from "@/hooks/usePrinters";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { Dashboard } from "@/pages/Dashboard";
+import { FilesPage } from "@/pages/FilesPage";
+import { HistoryPage } from "@/pages/HistoryPage";
 import { PrinterPage } from "@/pages/PrinterPage";
 
 export default function App() {
@@ -14,6 +16,8 @@ export default function App() {
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/printers/:id" element={<PrinterPage />} />
+              <Route path="/files" element={<FilesPage />} />
+              <Route path="/history" element={<HistoryPage />} />
               <Route path="*" element={<Dashboard />} />
             </Routes>
           </BrowserRouter>
