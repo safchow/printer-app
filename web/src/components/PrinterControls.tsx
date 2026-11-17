@@ -84,7 +84,7 @@ export function SpeedCard({ p, ctl, bare }: { p: Printer; ctl: Ctl; bare?: boole
         <Slider
           label="Print speed"
           value={p.speed_percent}
-          min={50}
+          min={20}
           max={160}
           step={10}
           disabled={!can}

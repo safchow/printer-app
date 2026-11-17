@@ -26,7 +26,7 @@ from .drivers.base import ControlError, ControlsDisabled
 log = logging.getLogger(__name__)
 
 MIN_GAP = 1.0
-SPEEDS = range(50, 161, 10)
+SPEEDS = range(20, 161, 10)
 PRINT_STATES = ("printing", "paused")
 OFFLINE = ("offline", "connecting")
 LIMITS = {"nozzle": 300, "bed": 100}
@@ -48,7 +48,7 @@ def check(driver: PrinterDriver, action: str, values: dict[str, Any]) -> None:
         if state not in PRINT_STATES:
             raise ControlError(409, "speed can only be changed during a print")
         if values["percent"] not in SPEEDS:
-            raise ControlError(422, "speed must be 50 to 160% in steps of 10")
+            raise ControlError(422, "speed must be 20 to 160% in steps of 10")
     if action == "fan":
         if values["percent"] not in range(0, 101, 10):
             raise ControlError(422, "fan speed must be 0 to 100% in steps of 10")

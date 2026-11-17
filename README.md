@@ -81,7 +81,7 @@ sends exactly one fixed command. On Moonraker printers:
 | Control | Command | Allowed |
 | --- | --- | --- |
 | Pause / Resume / Stop | `printer.print.pause` / `resume` / `cancel`, or the `PAUSE` / `RESUME` / `CANCEL_PRINT` macros if the printer's Moonraker lacks those methods | while printing or paused |
-| Speed | `M220 S50` to `S160`, steps of 10 | while printing or paused |
+| Speed | `M220 S20` to `S160`, steps of 10 | while printing or paused |
 | Fans | `SET_FAN_SPEED FAN=<name> SPEED=0..1`, steps of 10% | while online |
 | Nozzle / bed | `M104 S<°C>` / `M140 S<°C>`: 0, or 30 to 300 (nozzle) / 100 (bed) | while online |
 | Light | `SET_PIN PIN=<pin> VALUE=0/1` | while online |
