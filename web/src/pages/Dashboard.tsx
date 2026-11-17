@@ -1,7 +1,6 @@
 import { Link } from "react-router-dom";
 import { AppHeader } from "@/components/AppHeader";
-import { CameraStage } from "@/components/CameraStage";
-import { LiveCamera } from "@/components/LiveCamera";
+import { PrintView } from "@/components/PrintView";
 import { StateBadge } from "@/components/StateBadge";
 import { ThemePicker } from "@/components/ThemePicker";
 import { Card } from "@/components/ui/card";
@@ -33,21 +32,20 @@ function PrinterCard({ printer: p }: { printer: Printer }) {
   const offline = p.state === "offline" || p.state === "connecting";
   const active = isActive(p);
   return (
-    <Link
-      to={`/printers/${p.id}`}
+    // The whole card opens the printer (a stretched link); the Camera button sits above it.
+    <div
       className={cn(
-        "flex flex-col overflow-hidden rounded-xl border text-inherit no-underline transition-colors hover:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "relative flex flex-col overflow-hidden rounded-xl border transition-colors focus-within:ring-2 focus-within:ring-ring hover:border-ring",
         offline && "border-dashed",
       )}
     >
-      <CameraStage printer={p} size="card" className="aspect-video">
-        <LiveCamera printer={p} size="card" />
-        <StateBadge state={p.state} className="absolute top-3 left-3" />
-      </CameraStage>
+      <PrintView p={p} size="card" className="aspect-video" overlay={<StateBadge state={p.state} className="absolute top-3 left-3 z-20" />} />
       <div className="flex flex-col gap-3 px-5 pt-4 pb-5">
         <div className="flex items-baseline justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-base font-semibold">{p.name}</div>
+            <Link to={`/printers/${p.id}`} className="text-base font-semibold text-inherit no-underline outline-none after:absolute after:inset-0">
+              {p.name}
+            </Link>
             <div className="mt-0.5 truncate text-[13px] text-muted-foreground">{subline(p)}</div>
           </div>
           {active && <div className="font-mono text-2xl font-semibold">{Math.round((p.progress ?? 0) * 100)}%</div>}
@@ -60,7 +58,7 @@ function PrinterCard({ printer: p }: { printer: Printer }) {
           </div>
         )}
       </div>
-    </Link>
+    </div>
   );
 }
 
@@ -85,15 +83,14 @@ function MobileRow({ printer: p }: { printer: Printer }) {
 
 function MobileBigCard({ printer: p }: { printer: Printer }) {
   return (
-    <Link to={`/printers/${p.id}`} className="block overflow-hidden rounded-[14px] border text-inherit no-underline">
-      <CameraStage printer={p} size="card" className="h-[210px]">
-        <LiveCamera printer={p} size="card" />
-        <StateBadge state={p.state} className="absolute top-2.5 left-2.5" />
-      </CameraStage>
+    <div className="relative overflow-hidden rounded-[14px] border focus-within:ring-2 focus-within:ring-ring">
+      <PrintView p={p} size="card" className="h-[210px]" overlay={<StateBadge state={p.state} className="absolute top-2.5 left-2.5 z-20" />} />
       <div className="flex flex-col gap-2.5 px-4 pt-3.5 pb-4">
         <div className="flex items-baseline justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-base font-semibold">{p.name}</div>
+            <Link to={`/printers/${p.id}`} className="text-base font-semibold text-inherit no-underline outline-none after:absolute after:inset-0">
+              {p.name}
+            </Link>
             <div className="truncate text-xs text-muted-foreground">
               {p.filename}
               {p.total_layers ? ` · L ${p.layer ?? 0}/${p.total_layers}` : ""}
@@ -107,7 +104,7 @@ function MobileBigCard({ printer: p }: { printer: Printer }) {
           {p.state === "printing" && p.eta_at && ` · Done ${clock(p.eta_at)}`}
         </div>
       </div>
-    </Link>
+    </div>
   );
 }
 

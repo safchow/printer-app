@@ -85,7 +85,7 @@ function cssColor(name: string, fallback: string): THREE.Color {
   return c;
 }
 
-function Scene({ tp, size, progress }: { tp: Toolpath; size: number; progress: number }) {
+function Scene({ tp, size, progress, interactive }: { tp: Toolpath; size: number; progress: number; interactive: boolean }) {
   const host = React.useRef<HTMLDivElement>(null);
   const api = React.useRef<{ setDone: (k: number) => void } | null>(null);
 
@@ -137,6 +137,7 @@ function Scene({ tp, size, progress }: { tp: Toolpath; size: number; progress: n
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.target.copy(center);
     controls.enableDamping = false;
+    controls.enabled = interactive;
     controls.update();
 
     let frame = 0;
@@ -190,18 +191,25 @@ function Scene({ tp, size, progress }: { tp: Toolpath; size: number; progress: n
       renderer.dispose();
       renderer.domElement.remove();
     };
-  }, [tp]);
+  }, [tp, interactive]);
 
   const k = printedCount(tp, progress * size);
   React.useEffect(() => {
     api.current?.setDone(k);
   }, [k, tp]);
 
-  return <div ref={host} className="h-full w-full cursor-grab touch-none active:cursor-grabbing" aria-label="3D preview of the print. Drag to turn it, scroll to zoom." role="img" />;
+  return (
+    <div
+      ref={host}
+      className={cn("h-full w-full", interactive && "cursor-grab touch-none active:cursor-grabbing")}
+      aria-label={interactive ? "3D preview of the print. Drag to turn it, scroll to zoom." : "3D preview of the print."}
+      role="img"
+    />
+  );
 }
 
 /** The print's toolpath in 3D, with what's printed so far in the accent colour. */
-export function GcodePreview({ p, className }: { p: Printer; className?: string }) {
+export function GcodePreview({ p, className, interactive = true }: { p: Printer; className?: string; interactive?: boolean }) {
   const { info, toolpath } = useToolpath(p);
   const finished = p.state === "complete";
   const progress = finished ? 1 : (p.progress ?? 0);
@@ -217,7 +225,7 @@ export function GcodePreview({ p, className }: { p: Printer; className?: string 
   return (
     <div className={cn("relative overflow-hidden", className)}>
       {toolpath && toolpath.path.count > 0 && !message ? (
-        <Scene tp={toolpath.path} size={toolpath.size} progress={progress} />
+        <Scene tp={toolpath.path} size={toolpath.size} progress={progress} interactive={interactive} />
       ) : (
         <div className="flex h-full items-center justify-center p-4 text-center text-sm text-muted-foreground">{message}</div>
       )}
