@@ -1,3 +1,4 @@
+import * as React from "react";
 import { Link, useParams } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import { CameraStage } from "@/components/CameraStage";
@@ -17,6 +18,16 @@ import { usePrinters } from "@/hooks/usePrinters";
 import { clock, dayAndClock, duration, isActive, temp } from "@/lib/format";
 import type { Printer } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+// three.js is big: load the 3D preview only when the printer page shows it.
+const LazyPreview = React.lazy(() => import("@/components/GcodePreview").then((m) => ({ default: m.GcodePreview })));
+function GcodePreview(props: { p: Printer; className?: string }) {
+  return (
+    <React.Suspense fallback={<div className={props.className} />}>
+      <LazyPreview {...props} />
+    </React.Suspense>
+  );
+}
 
 function bars(p: Printer) {
   const file = p.progress != null ? p.progress * 100 : null;
@@ -80,9 +91,9 @@ function ProgressColumn({ p }: { p: Printer }) {
     <>
       <div className="flex flex-col gap-2">
         <CardTitle>Progress</CardTitle>
-        <div className="font-mono text-[56px] leading-none font-bold tracking-tight">{Math.round((p.progress ?? 0) * 100)}%</div>
+        <div className="font-mono text-[44px] leading-none font-bold tracking-tight">{Math.round((p.progress ?? 0) * 100)}%</div>
       </div>
-      <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-4">
         {bars(p).map((b) => (
           <div key={b.k} className="flex flex-col gap-2">
             <div className="flex justify-between gap-2 text-[13px]">
@@ -127,29 +138,40 @@ function Desktop({ p, ctl, rows }: { p: Printer; ctl: Ctl; rows: ActionRow[] }) 
           <ThemePicker />
         </div>
       </header>
-      {/* Layout B: camera + progress on top, four equal control cards below. */}
-      <main className="mx-auto grid w-full max-w-[1440px] grid-cols-[repeat(4,minmax(0,1fr))] gap-6 p-6 pb-12">
-        <StatusNote p={p} className="col-span-4" />
-        {ctl.error && (
-          <div className="col-span-4">
-            <ErrorLine ctl={ctl} />
-          </div>
-        )}
-        <CameraStage printer={p} className="col-span-3 aspect-video self-start rounded-xl border">
+      {/*
+        Layout B, sized to the window so it fits a 14" laptop without scrolling:
+        camera + progress (with the speed slider) on top; under them the 3D preview,
+        fans, temperature, and light + activity. 24 px between everything.
+      */}
+      <main className="mx-auto flex h-[calc(100dvh-4rem)] min-h-[720px] w-full max-w-[1440px] flex-col gap-6 p-6">
+        <StatusNote p={p} />
+        <ErrorLine ctl={ctl} />
+        <div className="grid min-h-0 flex-1 grid-cols-[repeat(4,minmax(0,1fr))] grid-rows-[minmax(0,1.35fr)_minmax(0,1fr)] gap-6">
+        <CameraStage printer={p} className="col-span-3 h-full min-h-0 rounded-xl border">
           <LiveCamera printer={p} />
         </CameraStage>
-        <Card className="flex min-h-0 flex-col justify-between gap-6 p-6">
+        <Card className="flex min-h-0 flex-col justify-between gap-4 overflow-hidden p-6">
           <ProgressColumn p={p} />
+          <div className="border-t pt-4">
+            <SpeedCard p={p} ctl={ctl} bare />
+          </div>
         </Card>
-        <SpeedCard p={p} ctl={ctl} className="gap-6 p-6" scale />
-        <FansCard p={p} ctl={ctl} className="gap-6 p-6" />
-        <TempCard p={p} ctl={ctl} className="gap-6 p-6" stacked />
-        <Card className="flex flex-col gap-6 p-6">
+        <Card className="flex min-h-0 flex-col gap-3 overflow-hidden p-0">
+          <div className="flex items-baseline justify-between px-6 pt-5">
+            <CardTitle>Model</CardTitle>
+            <span className="text-[11px] text-muted-foreground">drag to turn</span>
+          </div>
+          <GcodePreview p={p} className="min-h-0 flex-1" />
+        </Card>
+        <FansCard p={p} ctl={ctl} className="min-h-0 gap-5 overflow-hidden p-6" />
+        <TempCard p={p} ctl={ctl} className="min-h-0 gap-5 overflow-hidden p-6" stacked />
+        <Card className="flex min-h-0 flex-col gap-4 overflow-hidden p-6">
           <LightCard p={p} ctl={ctl} bare />
           <div className="border-t" />
           <ActivityCard rows={rows} bare empty={ctl.enabled ? "No actions yet." : "Controls are off."} />
         </Card>
-        {!ctl.enabled && <p className="col-span-4 m-0 text-xs text-muted-foreground">{CONTROLS_OFF}</p>}
+        </div>
+        {!ctl.enabled && <p className="m-0 -mt-3 text-xs text-muted-foreground">{CONTROLS_OFF}</p>}
       </main>
     </div>
   );
@@ -213,6 +235,9 @@ function Mobile({ p, ctl, rows }: { p: Printer; ctl: Ctl; rows: ActionRow[] }) {
                   </span>
                 </div>
                 <Times p={p} />
+              </Card>
+              <Card className="h-[240px] overflow-hidden p-0">
+                <GcodePreview p={p} className="h-full" />
               </Card>
             </>
           ) : (
