@@ -14,7 +14,7 @@ import { useIsMobile } from "@/hooks/useMediaQuery";
 import { useActions, type ActionRow } from "@/hooks/useActions";
 import { useControl } from "@/hooks/useControl";
 import { usePrinters } from "@/hooks/usePrinters";
-import { dayAndClock, duration, isActive, temp } from "@/lib/format";
+import { clock, dayAndClock, duration, isActive, temp } from "@/lib/format";
 import type { Printer } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -44,6 +44,24 @@ function StatusNote({ p }: { p: Printer }) {
     return <div className="rounded-lg bg-offline px-4 py-3 text-sm text-offline-foreground">{p.message ?? "The printer reported an error."}</div>;
   }
   return null;
+}
+
+/** Started and done-at times, under the progress bars. */
+function Times({ p }: { p: Printer }) {
+  const paused = p.state === "paused";
+  const done = p.state === "complete";
+  return (
+    <div className="flex items-end justify-between leading-tight">
+      <div className="flex flex-col">
+        <span className="text-[11px] text-muted-foreground">Started</span>
+        <span className="font-mono text-[15px] font-semibold">{clock(p.started_at)}</span>
+      </div>
+      <div className="flex flex-col text-right">
+        <span className="text-[11px] text-muted-foreground">{paused ? "Paused" : done ? "Finished" : "Done at"}</span>
+        <span className="font-mono text-[15px] font-semibold">{paused ? "On hold" : clock(p.eta_at)}</span>
+      </div>
+    </div>
+  );
 }
 
 function ProgressBody({ p, big = "text-4xl" }: { p: Printer; big?: string }) {
@@ -78,6 +96,7 @@ function ProgressBody({ p, big = "text-4xl" }: { p: Printer; big?: string }) {
           <Progress value={(p.progress ?? 0) * 100} className="h-1.5" />
         </div>
       </div>
+      <Times p={p} />
     </>
   );
 }
@@ -104,12 +123,12 @@ function Desktop({ p, ctl, rows }: { p: Printer; ctl: Ctl; rows: ActionRow[] }) 
       <main className="mx-auto flex max-w-[1360px] flex-wrap items-start gap-5 px-8 pt-6 pb-12">
         <section className="flex min-w-0 flex-[999_1_620px] flex-col gap-5">
           <StatusNote p={p} />
-          <CameraStage printer={p} className="aspect-video rounded-xl border">
-            <LiveCamera printer={p} />
-          </CameraStage>
           <Card className="flex flex-col gap-4.5 p-6">
             <ProgressBody p={p} />
           </Card>
+          <CameraStage printer={p} className="aspect-video rounded-xl border">
+            <LiveCamera printer={p} />
+          </CameraStage>
         </section>
         <aside className="flex min-w-0 flex-[1_1_380px] flex-col gap-4">
           <ErrorLine ctl={ctl} />
@@ -182,6 +201,7 @@ function Mobile({ p, ctl, rows }: { p: Printer; ctl: Ctl; rows: ActionRow[] }) {
                     {p.state === "printing" && remaining(p) != null && ` · ${duration(remaining(p))} left`}
                   </span>
                 </div>
+                <Times p={p} />
               </Card>
             </>
           ) : (

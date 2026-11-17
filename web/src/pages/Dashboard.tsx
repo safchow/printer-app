@@ -57,6 +57,7 @@ function PrinterCard({ printer: p }: { printer: Printer }) {
           <div className="font-mono text-[13px] text-muted-foreground">
             Nozzle {temp(p.nozzle.current)} · Bed {temp(p.bed.current)}
             {active && p.speed_percent != null && ` · Speed ${p.speed_percent}%`}
+            {p.state === "printing" && p.eta_at && ` · Done ${clock(p.eta_at)}`}
           </div>
         )}
       </div>
