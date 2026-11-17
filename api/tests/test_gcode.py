@@ -37,7 +37,8 @@ def test_fetched_once_and_served(tmp_path, printers_file, fake_server):
 
 
 def test_new_print_fetches_again(tmp_path, printers_file, fake_server):
-    with TestClient(create_app(make(tmp_path, printers_file))) as c:
+    # Without file capture; with it, a file already stored isn't fetched again (test_library.py).
+    with TestClient(create_app(make(tmp_path, printers_file, capture_files=False))) as c:
         wait_for_sync(lambda: info(c)["state"] == "ready")
         fake_server.scenario("complete")
         wait_for_sync(lambda: c.get("/api/printers/k1c").json()["state"] == "complete")

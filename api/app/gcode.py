@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import shutil
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
@@ -36,13 +37,17 @@ def gcode_url(config: PrinterConfig, filename: str) -> str:
 
 
 class GcodeCache:
-    def __init__(self, data_dir: Path, configs: dict[str, PrinterConfig], max_bytes: int = MAX_BYTES):
+    def __init__(self, data_dir: Path, configs: dict[str, PrinterConfig], max_bytes: int = MAX_BYTES,
+                 library=None):
         self.root = data_dir / "gcode"
         self.configs = configs
         self.max_bytes = max_bytes
         self._tried: dict[str, tuple[str, float]] = {}  # printer -> (filename, started_at) of the running print
         self._tasks: dict[str, asyncio.Task] = {}
         self.downloads = 0
+        # File capture (app/library.py), when on: a file it already holds isn't downloaded again,
+        # and a file fetched here is kept there too.
+        self.library = library
 
     def _dir(self, printer_id: str) -> Path:
         return self.root / printer_id
@@ -108,6 +113,18 @@ class GcodeCache:
         folder.mkdir(parents=True, exist_ok=True)
         part = folder / "download.part"
         meta = {"filename": filename, "started_at": started_at, "fetched_at": datetime.now().isoformat()}
+        try:
+            stored = await self.library.settled(printer_id, filename) if self.library else None
+            if stored is not None and self.library.file_path(stored).is_file():
+                await asyncio.to_thread(shutil.copyfile, self.library.file_path(stored), part)
+                part.replace(self.path(printer_id))
+                meta["size"] = self.path(printer_id).stat().st_size
+                meta["from_library"] = stored.id
+                self.library.link_print(printer_id, stored)
+                (folder / "meta.json").write_text(json.dumps(meta))
+                return
+        except Exception:
+            log.exception("%s: couldn't use the stored copy of %s", printer_id, filename)
         self.downloads += 1
         log.info("%s: fetching %s for the preview (once for this print)", printer_id, filename)
         try:
@@ -124,6 +141,13 @@ class GcodeCache:
                             f.write(chunk)
             part.replace(self.path(printer_id))
             meta["size"] = size
+            if self.library:
+                try:
+                    stored = await asyncio.to_thread(self.library.ingest, self.path(printer_id), filename,
+                                                     "print", printer_id)
+                    self.library.link_print(printer_id, stored)
+                except Exception:
+                    log.exception("%s: couldn't keep %s in the library", printer_id, filename)
         except Exception as exc:  # never retried; the page shows why
             part.unlink(missing_ok=True)
             meta["error"] = f"{type(exc).__name__}: {exc}"[:200]

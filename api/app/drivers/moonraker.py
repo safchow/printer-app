@@ -39,7 +39,7 @@ ALLOWED_GCODE = tuple(re.compile(p) for p in (
     r"SET_PIN PIN=[A-Za-z0-9_]{1,40} VALUE=[01]",
     r"PAUSE|RESUME|CANCEL_PRINT",
 ))
-# Notices Moonraker pushes about files and jobs; only logged (see _read).
+# Notices Moonraker pushes about files and jobs; logged and passed to notice listeners (file capture).
 FILE_NOTICES = frozenset({"notify_filelist_changed", "notify_history_changed"})
 PRINT_MACROS = {"printer.print.pause": "PAUSE", "printer.print.resume": "RESUME",
                 "printer.print.cancel": "CANCEL_PRINT"}
@@ -244,9 +244,8 @@ class MoonrakerDriver(PrinterDriver):
                 pending = await self._subscribe(ws)
             elif msg.get("method") in FILE_NOTICES:
                 # Passive: Moonraker pushes these on the connection we already hold.
-                # Logged for now, to learn whether Creality Print uploads announce
-                # themselves before file capture relies on it.
                 log.info("%s: %s %s", self.config.id, msg["method"], json.dumps(msg.get("params"))[:500])
+                await self._notice(msg["method"], msg.get("params"))
 
     async def _publish(self) -> None:
         self.status = apply_objects(self.status, self._objects, self.config)

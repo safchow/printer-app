@@ -30,7 +30,7 @@ from typing import Any
 
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse, PlainTextResponse
+from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
@@ -111,6 +111,7 @@ class FakeMoonraker:
         self.http_requests: list[str] = []
         self.gcode_downloads = 0
         self.gcode_missing = False
+        self.files: dict[str, bytes] = {}  # extra files in the G-code folder
         self._sockets: set[WebSocket] = set()
         self._subs: dict[WebSocket, dict[str, Any]] = {}
         self.set_scenario(scenario)
@@ -305,6 +306,24 @@ class FakeMoonraker:
             except Exception:
                 pass
 
+    async def upload(self, path: str, content: bytes, gap: float = 0.05) -> None:
+        """Act out a Creality Print upload the way the K1C reports it: create_file while
+        the file is still arriving, thumbnail churn under .thumbs/, then modify_file."""
+        def item(p: str, size: int) -> dict:
+            return {"root": "gcodes", "path": p, "size": size, "modified": time.time(), "permissions": "rw"}
+        await self.notify("notify_filelist_changed", [{"action": "create_file", "item": item(path, min(len(content), 102300))}])
+        for px in (96, 48, 300):
+            await asyncio.sleep(gap)
+            thumb = f".thumbs/{path.rsplit('.', 1)[0]}-{px}x{px}.png"
+            await self.notify("notify_filelist_changed", [{"action": "create_file", "item": item(thumb, 900)}])
+        await asyncio.sleep(gap)
+        self.files[path] = content
+        await self.notify("notify_filelist_changed", [{"action": "modify_file", "item": item(path, len(content))}])
+
+    async def delete(self, path: str) -> None:
+        self.files.pop(path, None)
+        await self.notify("notify_filelist_changed", [{"action": "delete_file", "item": {"root": "gcodes", "path": path, "size": 0}}])
+
     async def ticker(self) -> None:
         while True:
             await asyncio.sleep(self.tick_seconds)
@@ -333,7 +352,12 @@ class FakeMoonraker:
         async def gcode_file(r: Request):
             fake.http_requests.append(r.url.path)
             fake.gcode_downloads += 1
-            if fake.offline or fake.gcode_missing or r.path_params["path"] != fake.filename:
+            path = r.path_params["path"]
+            if fake.offline or fake.gcode_missing:
+                return JSONResponse({"error": "not found"}, status_code=404)
+            if path in fake.files:
+                return Response(fake.files[path], media_type="text/plain")
+            if path != fake.filename:
                 return JSONResponse({"error": "not found"}, status_code=404)
             return PlainTextResponse(fake_gcode())
 
