@@ -1,0 +1,9 @@
+.env
+printers.yaml
+data/*
+library/*
+!data/.gitkeep
+!library/.gitkeep
+api/static/
+**/__pycache__/
+.pytest_cache/
