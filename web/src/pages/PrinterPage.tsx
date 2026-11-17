@@ -1,10 +1,8 @@
-import * as React from "react";
 import { Link, useParams } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
-import { CameraStage } from "@/components/CameraStage";
-import { LiveCamera } from "@/components/LiveCamera";
 import { CONTROLS_OFF } from "@/components/ControlStub";
 import { ActionButtons, ActivityCard, type Ctl, ErrorLine, FansCard, LightCard, SpeedCard, TempCard } from "@/components/PrinterControls";
+import { PrintStage } from "@/components/PrintStage";
 import { StateBadge } from "@/components/StateBadge";
 import { ThemePicker } from "@/components/ThemePicker";
 import { Button } from "@/components/ui/button";
@@ -18,16 +16,6 @@ import { usePrinters } from "@/hooks/usePrinters";
 import { clock, dayAndClock, duration, isActive, temp } from "@/lib/format";
 import type { Printer } from "@/lib/types";
 import { cn } from "@/lib/utils";
-
-// three.js is big: load the 3D preview only when the printer page shows it.
-const LazyPreview = React.lazy(() => import("@/components/GcodePreview").then((m) => ({ default: m.GcodePreview })));
-function GcodePreview(props: { p: Printer; className?: string }) {
-  return (
-    <React.Suspense fallback={<div className={props.className} />}>
-      <LazyPreview {...props} />
-    </React.Suspense>
-  );
-}
 
 function bars(p: Printer) {
   const file = p.progress != null ? p.progress * 100 : null;
@@ -75,7 +63,7 @@ function Times({ p, size = "text-[15px]" }: { p: Printer; size?: string }) {
   );
 }
 
-/** Desktop progress card: fills the column beside the camera, top to bottom. */
+/** Desktop progress card: fills the column beside the model, top to bottom. */
 function ProgressColumn({ p }: { p: Printer }) {
   const active = isActive(p) || p.state === "complete";
   if (!active) {
@@ -140,29 +128,18 @@ function Desktop({ p, ctl, rows }: { p: Printer; ctl: Ctl; rows: ActionRow[] }) 
       </header>
       {/*
         Layout B, sized to the window so it fits a 14" laptop without scrolling:
-        camera + progress (with the speed slider) on top; under them the 3D preview,
-        fans, temperature, and light + activity. 24 px between everything.
+        the 3D model (camera on demand) + progress on top; under them speed, fans,
+        temperature, and light + activity. 24 px between everything.
       */}
       <main className="mx-auto flex h-[calc(100dvh-4rem)] min-h-[720px] w-full max-w-[1440px] flex-col gap-6 p-6">
         <StatusNote p={p} />
         <ErrorLine ctl={ctl} />
         <div className="grid min-h-0 flex-1 grid-cols-[repeat(4,minmax(0,1fr))] grid-rows-[minmax(0,1.35fr)_minmax(0,1fr)] gap-6">
-        <CameraStage printer={p} className="col-span-3 h-full min-h-0 rounded-xl border">
-          <LiveCamera printer={p} />
-        </CameraStage>
+        <PrintStage p={p} className="col-span-3 h-full min-h-0 rounded-xl border" />
         <Card className="flex min-h-0 flex-col justify-between gap-4 overflow-hidden p-6">
           <ProgressColumn p={p} />
-          <div className="border-t pt-4">
-            <SpeedCard p={p} ctl={ctl} bare />
-          </div>
         </Card>
-        <Card className="flex min-h-0 flex-col gap-3 overflow-hidden p-0">
-          <div className="flex items-baseline justify-between px-6 pt-5">
-            <CardTitle>Model</CardTitle>
-            <span className="text-[11px] text-muted-foreground">drag to turn</span>
-          </div>
-          <GcodePreview p={p} className="min-h-0 flex-1" />
-        </Card>
+        <SpeedCard p={p} ctl={ctl} className="min-h-0 gap-5 overflow-hidden p-6" scale />
         <FansCard p={p} ctl={ctl} className="min-h-0 gap-5 overflow-hidden p-6" />
         <TempCard p={p} ctl={ctl} className="min-h-0 gap-5 overflow-hidden p-6" stacked />
         <Card className="flex min-h-0 flex-col gap-4 overflow-hidden p-6">
@@ -193,9 +170,7 @@ function Mobile({ p, ctl, rows }: { p: Printer; ctl: Ctl; rows: ActionRow[] }) {
         <StateBadge state={p.state} />
         <ThemePicker />
       </header>
-      <CameraStage printer={p} className="h-[220px]">
-        <LiveCamera printer={p} />
-      </CameraStage>
+      <PrintStage p={p} className="h-[260px]" />
       <div className="px-4 pt-3.5">
         <StatusNote p={p} />
       </div>
@@ -235,9 +210,6 @@ function Mobile({ p, ctl, rows }: { p: Printer; ctl: Ctl; rows: ActionRow[] }) {
                   </span>
                 </div>
                 <Times p={p} />
-              </Card>
-              <Card className="h-[240px] overflow-hidden p-0">
-                <GcodePreview p={p} className="h-full" />
               </Card>
             </>
           ) : (

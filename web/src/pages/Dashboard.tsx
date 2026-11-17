@@ -1,7 +1,6 @@
 import { Link } from "react-router-dom";
 import { AppHeader } from "@/components/AppHeader";
-import { CameraStage } from "@/components/CameraStage";
-import { LiveCamera } from "@/components/LiveCamera";
+import { PrintStage } from "@/components/PrintStage";
 import { StateBadge } from "@/components/StateBadge";
 import { ThemePicker } from "@/components/ThemePicker";
 import { Card } from "@/components/ui/card";
@@ -40,10 +39,9 @@ function PrinterCard({ printer: p }: { printer: Printer }) {
         offline && "border-dashed",
       )}
     >
-      <CameraStage printer={p} size="card" className="aspect-video">
-        <LiveCamera printer={p} size="card" />
-        <StateBadge state={p.state} className="absolute top-3 left-3" />
-      </CameraStage>
+      <PrintStage p={p} size="card" className="aspect-video">
+        <StateBadge state={p.state} className="absolute top-3 left-3 z-10" />
+      </PrintStage>
       <div className="flex flex-col gap-3 px-5 pt-4 pb-5">
         <div className="flex items-baseline justify-between gap-3">
           <div className="min-w-0">
@@ -86,10 +84,9 @@ function MobileRow({ printer: p }: { printer: Printer }) {
 function MobileBigCard({ printer: p }: { printer: Printer }) {
   return (
     <Link to={`/printers/${p.id}`} className="block overflow-hidden rounded-[14px] border text-inherit no-underline">
-      <CameraStage printer={p} size="card" className="h-[210px]">
-        <LiveCamera printer={p} size="card" />
-        <StateBadge state={p.state} className="absolute top-2.5 left-2.5" />
-      </CameraStage>
+      <PrintStage p={p} size="card" className="h-[210px]">
+        <StateBadge state={p.state} className="absolute top-2.5 left-2.5 z-10" />
+      </PrintStage>
       <div className="flex flex-col gap-2.5 px-4 pt-3.5 pb-4">
         <div className="flex items-baseline justify-between gap-3">
           <div className="min-w-0">
