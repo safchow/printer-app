@@ -33,6 +33,7 @@ export interface Printer {
   fans: { name: string; percent: number | null }[];
   light_on: boolean | null;
   has_camera: boolean;
+  camera: string;
   cfs: boolean;
   last_seen: string | null;
   updated_at: string | null;

@@ -15,7 +15,13 @@ export function CameraStage({
   children?: React.ReactNode;
 }) {
   const offline = printer.state === "offline" || printer.state === "connecting";
-  const label = offline ? "No camera while offline" : printer.has_camera ? "Camera view comes in a later update" : "No camera";
+  const label = offline
+    ? "No camera while offline"
+    : printer.has_camera
+      ? size === "card"
+        ? "Open the printer to watch live"
+        : "Camera"
+      : "No camera";
   const active = isActive(printer);
   const paused = printer.state === "paused";
   const pct = Math.round((printer.progress ?? 0) * 100);

@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     tailscale_socket: str = ""
     # How long to wait between connection attempts to an offline printer.
     reconnect_seconds: float = 30.0
+    # At most one camera handshake per printer this often.
+    camera_min_interval: float = 5.0
     static_dir: Path | None = None
 
     @property

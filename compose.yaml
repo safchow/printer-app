@@ -16,6 +16,7 @@ services:
       TZ: ${TZ:-UTC}
       IMPORT_TOKEN: ${IMPORT_TOKEN:-}
       TAILSCALE_SOCKET: ${TAILSCALE_SOCKET:-}
+      CAMERA_MIN_INTERVAL: ${CAMERA_MIN_INTERVAL:-5}
     volumes:
       - ${PRINTERS_FILE:-./printers.yaml}:/config/printers.yaml:ro
       - ${DATA_DIR:-./data}:/data
@@ -29,6 +30,6 @@ services:
     profiles: [fake]
     image: printer-api:local
     container_name: printer-fake-moonraker
-    command: ["python", "/fakes/fake_moonraker.py", "--host", "0.0.0.0", "--port", "7125"]
+    command: ["python", "/fakes/fake_moonraker.py", "--host", "0.0.0.0", "--port", "7125", "--camera-port", "8000"]
     healthcheck:
       disable: true

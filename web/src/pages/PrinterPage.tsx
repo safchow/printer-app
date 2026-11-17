@@ -1,6 +1,7 @@
 import { Link, useParams } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import { CameraStage } from "@/components/CameraStage";
+import { LiveCamera } from "@/components/LiveCamera";
 import { CONTROLS_LATER, ControlStub } from "@/components/ControlStub";
 import { StateBadge } from "@/components/StateBadge";
 import { ThemePicker } from "@/components/ThemePicker";
@@ -247,9 +248,7 @@ function Desktop({ p }: { p: Printer }) {
         <section className="flex min-w-0 flex-[999_1_620px] flex-col gap-5">
           <StatusNote p={p} />
           <CameraStage printer={p} className="aspect-video rounded-xl border">
-            {p.has_camera && !["offline", "connecting"].includes(p.state) && (
-              <span className="absolute top-3 left-3 rounded-md bg-background px-2 py-0.5 text-xs font-medium text-muted-foreground">Camera</span>
-            )}
+            <LiveCamera printer={p} />
           </CameraStage>
           <Card className="flex flex-col gap-4.5 p-6">
             <ProgressBody p={p} />
@@ -283,7 +282,9 @@ function Mobile({ p }: { p: Printer }) {
         <StateBadge state={p.state} />
         <ThemePicker />
       </header>
-      <CameraStage printer={p} className="h-[220px]" />
+      <CameraStage printer={p} className="h-[220px]">
+        <LiveCamera printer={p} />
+      </CameraStage>
       <div className="px-4 pt-3.5">
         <StatusNote p={p} />
       </div>
