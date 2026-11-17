@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import Settings
-from app.main import CONTROLS, create_app
+from app.main import create_app
 
 from .conftest import wait_for_sync
 
@@ -42,12 +42,17 @@ def test_printer_status(client):
     assert client.get("/api/printers/nope").status_code == 404
 
 
-@pytest.mark.parametrize("action", CONTROLS)
-def test_controls_are_stubbed(client, fake_server, action):
+BODIES = {"pause": None, "resume": None, "cancel": None, "speed": {"percent": 100},
+          "fan": {"name": "Model fan", "percent": 50}, "temp": {"heater": "nozzle", "target": 200},
+          "light": {"on": True}}
+
+
+@pytest.mark.parametrize("action", BODIES)
+def test_controls_off_by_default(client, fake_server, action):
     wait_for_sync(lambda: state_of(client) == "printing")
-    r = client.post(f"/api/printers/k1c/{action}", json={"value": 1})
+    r = client.post(f"/api/printers/k1c/{action}", json=BODIES[action])
     assert r.status_code == 501
-    assert client.post(f"/api/printers/nope/{action}").status_code == 404
+    assert client.post(f"/api/printers/nope/{action}", json=BODIES[action]).status_code == 404
     assert set(fake_server.fake.methods) == {"printer.objects.subscribe"}
 
 
@@ -67,7 +72,7 @@ def test_database_migrated_and_synced(client, settings):
     version = con.execute("select version_num from alembic_version").fetchone()[0]
     con.close()
     assert rows[0][:3] == ("k1c", "K1C", "moonraker")
-    assert version == "0001"
+    assert version == "0002"
 
 
 def test_last_seen_survives_restart(settings, fake_server):

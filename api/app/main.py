@@ -14,10 +14,14 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __doc__ as about
+from pydantic import BaseModel, Field
+
 from .camera import CameraError, CameraRelay, SessionDescription
 from .config import Settings, load_printers
 from .db import make_engine, migrate
 from .drivers import PrinterStatus
+from .controls import Controls
+from .drivers.base import ControlError, ControlsDisabled
 from .hub import Hub
 from .relay import Go2rtc, decode_go2rtc_offer, encode_answer, fix_answer, fix_offer, pump
 
@@ -25,7 +29,19 @@ log = logging.getLogger(__name__)
 VERSION = "0.1.0"
 DEFAULT_STATIC = Path(__file__).resolve().parent.parent / "static"
 
-CONTROLS = ("pause", "resume", "cancel", "speed", "fan", "temp", "light")
+class SpeedBody(BaseModel):
+    percent: int
+
+class FanBody(BaseModel):
+    name: str = Field(max_length=60)
+    percent: int
+
+class TempBody(BaseModel):
+    heater: str = Field(max_length=20)
+    target: int
+
+class LightBody(BaseModel):
+    on: bool
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -41,6 +57,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             log.warning("no printers configured in %s", settings.printers_file)
         hub = Hub(printers, engine, reconnect_seconds=settings.reconnect_seconds)
         app.state.hub = hub
+        for driver in hub.drivers.values():
+            driver.controls_enabled = settings.controls_enabled
+        app.state.controls = Controls(engine, settings.controls_enabled)
         app.state.camera = CameraRelay(min_interval=settings.camera_min_interval)
         app.state.go2rtc = (Go2rtc(settings.go2rtc_url, settings.camera_callback_url, settings.data_dir)
                             if settings.go2rtc_url else None)
@@ -62,7 +81,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/config")
     def public_config() -> dict:
-        return {"version": VERSION, "tz": settings.tz, "controls_enabled": False,
+        return {"version": VERSION, "tz": settings.tz, "controls_enabled": settings.controls_enabled,
                 "reconnect_seconds": settings.reconnect_seconds,
                 "camera_mode": "relay" if settings.go2rtc_url else "direct"}
 
@@ -77,17 +96,55 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(404, "no such printer")
         return driver.status
 
-    # Controls are part of the API shape but stay off until the controls phase.
-    # Nothing here reaches a printer.
-    for action in CONTROLS:
-        def make(action: str):
-            async def control(printer_id: str) -> JSONResponse:
-                if not hub_of().get(printer_id):
-                    raise HTTPException(404, "no such printer")
-                return JSONResponse({"detail": f"{action} is not enabled in this version"}, status_code=501)
-            control.__name__ = f"control_{action}"
-            return control
-        app.post(f"/api/printers/{{printer_id}}/{action}", status_code=501)(make(action))
+    # --- controls (app/controls.py has the rules) ---
+
+    async def control(printer_id: str, action: str, values: dict, request: Request) -> dict:
+        driver = hub_of().get(printer_id)
+        if not driver:
+            raise HTTPException(404, "no such printer")
+        device = request.client.host if request.client else None
+        try:
+            command = await app.state.controls.run(driver, action, values, device)
+        except ControlsDisabled as exc:
+            raise HTTPException(501, str(exc)) from exc
+        except ControlError as exc:
+            raise HTTPException(exc.status, exc.detail) from exc
+        return {"ok": True, "command": command}
+
+    @app.post("/api/printers/{printer_id}/pause")
+    async def control_pause(printer_id: str, request: Request) -> dict:
+        return await control(printer_id, "pause", {}, request)
+
+    @app.post("/api/printers/{printer_id}/resume")
+    async def control_resume(printer_id: str, request: Request) -> dict:
+        return await control(printer_id, "resume", {}, request)
+
+    @app.post("/api/printers/{printer_id}/cancel")
+    async def control_cancel(printer_id: str, request: Request) -> dict:
+        return await control(printer_id, "cancel", {}, request)
+
+    @app.post("/api/printers/{printer_id}/speed")
+    async def control_speed(printer_id: str, body: SpeedBody, request: Request) -> dict:
+        return await control(printer_id, "speed", body.model_dump(), request)
+
+    @app.post("/api/printers/{printer_id}/fan")
+    async def control_fan(printer_id: str, body: FanBody, request: Request) -> dict:
+        return await control(printer_id, "fan", body.model_dump(), request)
+
+    @app.post("/api/printers/{printer_id}/temp")
+    async def control_temp(printer_id: str, body: TempBody, request: Request) -> dict:
+        return await control(printer_id, "temp", body.model_dump(), request)
+
+    @app.post("/api/printers/{printer_id}/light")
+    async def control_light(printer_id: str, body: LightBody, request: Request) -> dict:
+        return await control(printer_id, "light", body.model_dump(), request)
+
+    @app.get("/api/printers/{printer_id}/actions")
+    def printer_actions(printer_id: str, limit: int = 20) -> list[dict]:
+        if not hub_of().get(printer_id):
+            raise HTTPException(404, "no such printer")
+        rows = app.state.controls.recent(printer_id, max(1, min(limit, 500)))
+        return [r.model_dump(mode="json") for r in rows]
 
     @app.post("/api/printers/{printer_id}/camera/offer", response_model=SessionDescription)
     async def camera_offer(printer_id: str, offer: SessionDescription) -> SessionDescription:

@@ -1,9 +1,9 @@
 # Printer app
 
-A private web app for watching 3D printers: a dashboard of every printer and a
-page per printer, on desktop and phone, with the printer's live camera. It
-shows **status only** so far: controls, the file library and printing from
-the app come in later versions (see the roadmap).
+A private web app for watching and controlling 3D printers: a dashboard of
+every printer and a page per printer, on desktop and phone, with the printer's
+live camera and its controls. The file library and printing from the app come
+in later versions (see the roadmap).
 
 It runs as one Docker Compose stack on any machine that can reach your
 printers, and is meant to be reached over a private network (Tailscale,
@@ -31,8 +31,10 @@ These rules are enforced in the driver, not just the UI:
 - one connection per printer, only to the host and port in `printers.yaml`; no scanning;
 - when a printer drops or can't be reached, it shows as offline with its
   last-seen time, and the app tries **one** reconnect every 30 seconds;
-- read-only: the only method the driver will send is `printer.objects.subscribe`.
-  The control endpoints exist but return `501 Not Implemented` and never reach a printer.
+- read-only unless `CONTROLS_ENABLED=true`: until then the only method the
+  driver sends is `printer.objects.subscribe`, and the control endpoints return
+  `501`. With controls on, only the fixed commands under [Controls](#controls)
+  can be sent.
 
 ## Live camera
 
@@ -68,6 +70,29 @@ address:
   `sudo tailscale set --accept-routes`.
 - **WireGuard:** add the printer's IP to the client's `AllowedIPs`.
 - **LAN:** nothing to do.
+
+## Controls
+
+With `CONTROLS_ENABLED=true` in `.env`, the printer page's buttons work:
+Pause, Resume and Stop (Pause and Stop ask first), a print speed slider (50 to
+160%), fan sliders, nozzle and bed targets, and the chamber light. Each button
+sends exactly one fixed command. On Moonraker printers:
+
+| Control | Command | Allowed |
+| --- | --- | --- |
+| Pause / Resume / Stop | `printer.print.pause` / `resume` / `cancel`, or the `PAUSE` / `RESUME` / `CANCEL_PRINT` macros if the printer's Moonraker lacks those methods | while printing or paused |
+| Speed | `M220 S50` to `S160`, steps of 10 | while printing or paused |
+| Fans | `SET_FAN_SPEED FAN=<name> SPEED=0..1`, steps of 10% | while online |
+| Nozzle / bed | `M104 S<°C>` / `M140 S<°C>`: 0, or 30 to 300 (nozzle) / 100 (bed) | while online |
+| Light | `SET_PIN PIN=<pin> VALUE=0/1` | while online |
+
+The rules are enforced on the server, not just in the page. The driver only
+sends G-code that matches its allowlist exactly, and the API never accepts
+G-code text. It allows one command per printer at a time, at most one a
+second, and never retries one. Nothing is sent while the printer is offline.
+Every press, including refused ones, goes into the action log. The printer
+page shows the last 20 presses, and `GET /api/printers/{id}/actions` returns
+the full history.
 
 ## Setup
 
@@ -147,6 +172,7 @@ changing a table in `api/app/db.py`, add a migration with
 | `LIBRARY_ROOT` | Print files (used from the library version on) | `./library` |
 | `PRINTERS_FILE` | Which printers file to mount | `./printers.yaml` |
 | `TZ` | Time zone for times in the app | `UTC` |
+| `CONTROLS_ENABLED` | Turns on the printer controls | `false` |
 | `CAMERA_MIN_INTERVAL` | Seconds between camera handshakes per printer | `5` |
 | `GO2RTC_URL` | Camera relay address; empty turns the relay off (direct mode) | `http://go2rtc:1984` |
 | `PUID` / `PGID` | User the container runs as | `1000` |

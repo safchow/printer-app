@@ -64,7 +64,16 @@ StatusListener = Callable[[PrinterStatus], Awaitable[None]]
 
 
 class ControlsDisabled(RuntimeError):
-    """Raised by every control in this build: the drivers are read-only."""
+    """Raised by every control when controls are off for this printer (CONTROLS_ENABLED)."""
+
+
+class ControlError(RuntimeError):
+    """A control that couldn't be done. `status` is the HTTP status to report."""
+
+    def __init__(self, status: int, detail: str):
+        super().__init__(detail)
+        self.status = status
+        self.detail = detail
 
 
 class PrinterDriver(abc.ABC):
@@ -107,24 +116,28 @@ class PrinterDriver(abc.ABC):
     async def run(self) -> None:
         """Keep one connection to the printer alive and update self.status."""
 
-    # Controls: part of the interface, disabled until the controls phase.
-    async def pause(self) -> None:
-        raise ControlsDisabled("controls are not enabled in this version")
+    # Controls. Each returns the command it sent, for the action log. The
+    # checks every printer type shares (state, limits, rate) are in
+    # app/controls.py; a driver only builds and sends its own commands.
+    controls_enabled = False
 
-    async def resume(self) -> None:
-        raise ControlsDisabled("controls are not enabled in this version")
+    async def pause(self) -> str:
+        raise ControlsDisabled("controls are not supported for this printer type")
 
-    async def cancel(self) -> None:
-        raise ControlsDisabled("controls are not enabled in this version")
+    async def resume(self) -> str:
+        raise ControlsDisabled("controls are not supported for this printer type")
 
-    async def set_speed(self, percent: int) -> None:
-        raise ControlsDisabled("controls are not enabled in this version")
+    async def cancel(self) -> str:
+        raise ControlsDisabled("controls are not supported for this printer type")
 
-    async def set_fan(self, name: str, percent: int) -> None:
-        raise ControlsDisabled("controls are not enabled in this version")
+    async def set_speed(self, percent: int) -> str:
+        raise ControlsDisabled("controls are not supported for this printer type")
 
-    async def set_temp(self, heater: str, target: float) -> None:
-        raise ControlsDisabled("controls are not enabled in this version")
+    async def set_fan(self, name: str, percent: int) -> str:
+        raise ControlsDisabled("controls are not supported for this printer type")
 
-    async def set_light(self, on: bool) -> None:
-        raise ControlsDisabled("controls are not enabled in this version")
+    async def set_temp(self, heater: str, target: int) -> str:
+        raise ControlsDisabled("controls are not supported for this printer type")
+
+    async def set_light(self, on: bool) -> str:
+        raise ControlsDisabled("controls are not supported for this printer type")

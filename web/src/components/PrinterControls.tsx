@@ -1,0 +1,308 @@
+import * as React from "react";
+import { ControlStub } from "@/components/ControlStub";
+import { Button } from "@/components/ui/button";
+import { Card, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
+import type { ActionRow } from "@/hooks/useActions";
+import type { useControl } from "@/hooks/useControl";
+import { clock, isActive } from "@/lib/format";
+import type { Printer } from "@/lib/types";
+import { cn } from "@/lib/utils";
+
+export type Ctl = ReturnType<typeof useControl> & { enabled: boolean };
+
+const offline = (p: Printer) => p.state === "offline" || p.state === "connecting";
+
+/** Wraps a control so that, when controls are off on the server, it explains why. */
+function Gate({ ctl, children, className }: { ctl: Ctl; children: React.ReactNode; className?: string }) {
+  return ctl.enabled ? <>{children}</> : <ControlStub className={className}>{children}</ControlStub>;
+}
+
+/**
+ * A 0-100 style slider that only sends when you let go. Shows the printer's
+ * value unless you're dragging.
+ */
+function Slider({
+  label,
+  value,
+  min,
+  max,
+  step,
+  disabled,
+  onCommit,
+}: {
+  label: string;
+  value: number | null;
+  min: number;
+  max: number;
+  step: number;
+  disabled?: boolean;
+  onCommit: (v: number) => void;
+}) {
+  const [draft, setDraft] = React.useState<number | null>(null);
+  const shown = draft ?? (value == null ? min : Math.round(value / step) * step);
+  const commit = () => {
+    if (draft != null && draft !== value) onCommit(draft);
+    setDraft(null);
+  };
+  return (
+    <input
+      type="range"
+      aria-label={label}
+      min={min}
+      max={max}
+      step={step}
+      value={shown}
+      disabled={disabled}
+      onChange={(e) => setDraft(Number(e.target.value))}
+      onPointerUp={commit}
+      onKeyUp={commit}
+      onBlur={() => setDraft(null)}
+      className="h-6 w-full cursor-pointer accent-[var(--brand)] disabled:cursor-not-allowed disabled:opacity-50"
+    />
+  );
+}
+
+function ErrorLine({ ctl }: { ctl: Ctl }) {
+  return ctl.error ? <p className="m-0 text-[13px] text-destructive">{ctl.error}</p> : null;
+}
+
+function Shell({ bare, className, children }: { bare?: boolean; className?: string; children: React.ReactNode }) {
+  return bare ? <div className={cn("flex flex-col", className)}>{children}</div> : <Card className={cn("flex flex-col p-5", className)}>{children}</Card>;
+}
+
+export function SpeedCard({ p, ctl, bare }: { p: Printer; ctl: Ctl; bare?: boolean }) {
+  const can = ctl.enabled && isActive(p) && !ctl.busy;
+  return (
+    <Shell bare={bare} className="gap-3">
+      <div className="flex items-baseline justify-between">
+        <CardTitle>Print speed</CardTitle>
+        <span className="font-mono text-xl font-semibold">{p.speed_percent ?? "--"}%</span>
+      </div>
+      <Gate ctl={ctl} className="w-full">
+        <Slider
+          label="Print speed"
+          value={p.speed_percent}
+          min={50}
+          max={160}
+          step={10}
+          disabled={!can}
+          onCommit={(percent) => ctl.run("speed", { percent })}
+        />
+      </Gate>
+      {ctl.enabled && !isActive(p) && <p className="m-0 text-xs text-muted-foreground">Speed can be changed during a print.</p>}
+    </Shell>
+  );
+}
+
+export function FansCard({ p, ctl, bare }: { p: Printer; ctl: Ctl; bare?: boolean }) {
+  const can = ctl.enabled && !offline(p) && !ctl.busy;
+  return (
+    <Shell bare={bare} className="gap-3.5">
+      <CardTitle>Fans</CardTitle>
+      {p.fans.length === 0 && <p className="m-0 text-sm text-muted-foreground">No fan data from this printer.</p>}
+      {p.fans.map((f) => (
+        <div key={f.name} className="flex flex-col gap-1">
+          <div className="flex justify-between text-sm">
+            <span>{f.name}</span>
+            <span className="font-mono text-muted-foreground">{f.percent == null ? "--" : `${Math.round(f.percent)}%`}</span>
+          </div>
+          <Gate ctl={ctl} className="w-full">
+            <Slider
+              label={f.name}
+              value={f.percent}
+              min={0}
+              max={100}
+              step={10}
+              disabled={!can}
+              onCommit={(percent) => ctl.run("fan", { name: f.name, percent }, `fan:${f.name}`)}
+            />
+          </Gate>
+        </div>
+      ))}
+    </Shell>
+  );
+}
+
+function TempRow({ name, heater, t, p, ctl, max }: { name: string; heater: "nozzle" | "bed"; t: Printer["nozzle"]; p: Printer; ctl: Ctl; max: number }) {
+  const [draft, setDraft] = React.useState("");
+  const can = ctl.enabled && !offline(p) && !ctl.busy;
+  const n = Number(draft);
+  const valid = draft !== "" && Number.isInteger(n) && (n === 0 || (n >= 30 && n <= max));
+  const send = async () => {
+    if (!valid) return;
+    if (await ctl.run("temp", { heater, target: n }, `temp:${heater}`)) setDraft("");
+  };
+  return (
+    <form
+      className="flex items-center gap-2.5"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void send();
+      }}
+    >
+      <div className="flex-1">
+        <div className="text-sm">{name}</div>
+        <div className="font-mono text-xs text-muted-foreground">
+          now {t.current == null ? "--" : `${t.current.toFixed(1)}°`} · target {t.target == null ? "--" : `${Math.round(t.target)}°`}
+        </div>
+      </div>
+      <Gate ctl={ctl}>
+        <input
+          inputMode="numeric"
+          aria-label={`${name} target, 0 or 30 to ${max} degrees`}
+          placeholder={t.target == null ? "°" : `${Math.round(t.target)}°`}
+          value={draft}
+          disabled={!can}
+          onChange={(e) => setDraft(e.target.value.replace(/[^0-9]/g, "").slice(0, 3))}
+          className="h-9 w-16 rounded-md border bg-background px-2 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+        />
+      </Gate>
+      <Gate ctl={ctl}>
+        <Button type="submit" variant="secondary" size="sm" disabled={!can || !valid}>
+          Set
+        </Button>
+      </Gate>
+    </form>
+  );
+}
+
+export function TempCard({ p, ctl, bare }: { p: Printer; ctl: Ctl; bare?: boolean }) {
+  return (
+    <Shell bare={bare} className="gap-3">
+      <CardTitle>Temperature</CardTitle>
+      <TempRow name="Nozzle" heater="nozzle" t={p.nozzle} p={p} ctl={ctl} max={300} />
+      <TempRow name="Bed" heater="bed" t={p.bed} p={p} ctl={ctl} max={100} />
+      <p className="m-0 text-xs text-muted-foreground">0 turns a heater off. Nozzle up to 300°, bed up to 100°.</p>
+    </Shell>
+  );
+}
+
+export function LightCard({ p, ctl, bare }: { p: Printer; ctl: Ctl; bare?: boolean }) {
+  const can = ctl.enabled && !offline(p) && !ctl.busy && p.light_on != null;
+  const body = (
+    <>
+      <span className="text-sm font-medium">Chamber light</span>
+      <Gate ctl={ctl}>
+        <Switch checked={!!p.light_on} disabled={!can} onCheckedChange={(on) => ctl.run("light", { on })} aria-label="Chamber light" />
+      </Gate>
+    </>
+  );
+  return bare ? (
+    <div className="flex items-center justify-between">{body}</div>
+  ) : (
+    <Card className="flex items-center justify-between px-5 py-4">{body}</Card>
+  );
+}
+
+/** Pause / Resume / Stop. Pause and Stop ask first. */
+export function ActionButtons({ p, ctl, mobile }: { p: Printer; ctl: Ctl; mobile?: boolean }) {
+  const [confirm, setConfirm] = React.useState<"pause" | "cancel" | null>(null);
+  if (!isActive(p)) return null;
+  const cls = mobile ? "h-[52px] w-full rounded-[10px] text-base" : undefined;
+  const wrap = mobile ? "w-full" : undefined;
+  const pct = Math.round((p.progress ?? 0) * 100);
+  const busy = !!ctl.busy;
+  return (
+    <>
+      <Gate ctl={ctl} className={wrap}>
+        {p.state === "paused" ? (
+          <Button variant="brand" disabled={!ctl.enabled || busy} className={cls} onClick={() => ctl.run("resume")}>
+            {ctl.busy === "resume" ? "Resuming…" : "Resume"}
+          </Button>
+        ) : (
+          <Button variant="outline" disabled={!ctl.enabled || busy} className={cls} onClick={() => setConfirm("pause")}>
+            {ctl.busy === "pause" ? "Pausing…" : "Pause"}
+          </Button>
+        )}
+      </Gate>
+      <Gate ctl={ctl} className={wrap}>
+        <Button variant="destructive" disabled={!ctl.enabled || busy} className={cls} onClick={() => setConfirm("cancel")}>
+          {ctl.busy === "cancel" ? "Stopping…" : "Stop"}
+        </Button>
+      </Gate>
+      <Dialog open={confirm !== null} onOpenChange={(o) => !o && setConfirm(null)}>
+        <DialogContent>
+          <DialogTitle className="m-0 text-lg font-semibold">{confirm === "cancel" ? "Stop this print?" : "Pause this print?"}</DialogTitle>
+          <DialogDescription className="m-0 text-sm text-muted-foreground">
+            {confirm === "cancel"
+              ? `${p.filename ?? "The print"} is ${pct}% done. Stopping it can't be undone.`
+              : `${p.filename ?? "The print"} will pause at ${pct}%. You can resume it from here.`}
+          </DialogDescription>
+          <div className="flex justify-end gap-2">
+            <DialogClose asChild>
+              <Button variant="outline">Keep printing</Button>
+            </DialogClose>
+            <Button
+              variant={confirm === "cancel" ? "destructive" : "brand"}
+              onClick={() => {
+                const action = confirm!;
+                setConfirm(null);
+                void ctl.run(action);
+              }}
+            >
+              {confirm === "cancel" ? "Stop print" : "Pause"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+const ACTION_NAMES: Record<string, string> = {
+  pause: "Pause",
+  resume: "Resume",
+  cancel: "Stop",
+  speed: "Speed",
+  fan: "Fan",
+  temp: "Temperature",
+  light: "Light",
+};
+
+function describe(r: ActionRow): string {
+  const v = r.values as Record<string, string | number | boolean>;
+  switch (r.action) {
+    case "speed":
+      return `Speed ${v.percent}%`;
+    case "fan":
+      return `${v.name} ${v.percent}%`;
+    case "temp":
+      return `${v.heater === "bed" ? "Bed" : "Nozzle"} ${v.target === 0 ? "off" : `${v.target}°`}`;
+    case "light":
+      return `Light ${v.on ? "on" : "off"}`;
+    default:
+      return ACTION_NAMES[r.action] ?? r.action;
+  }
+}
+
+export function ActivityCard({ rows, bare }: { rows: ActionRow[]; bare?: boolean }) {
+  if (rows.length === 0) return null;
+  return (
+    <Shell bare={bare} className="gap-2.5">
+      <CardTitle>Activity</CardTitle>
+      <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
+        {rows.map((r) => (
+          <li key={r.id} className="flex items-baseline justify-between gap-3 text-[13px]">
+            <span className="min-w-0 truncate">
+              {describe(r)}
+              {r.result !== "sent" && (
+                <span className="text-destructive" title={r.detail ?? undefined}>
+                  {" "}
+                  · {r.result}
+                </span>
+              )}
+            </span>
+            <span className="shrink-0 font-mono text-xs text-muted-foreground">
+              {clock(r.at)}
+              {r.device ? ` · ${r.device}` : ""}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </Shell>
+  );
+}
+
+export { ErrorLine };
