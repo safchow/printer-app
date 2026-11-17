@@ -1,0 +1,16 @@
+# go2rtc, the camera relay (docs/camera-relay.md). The app tells go2rtc which
+# camera to open when someone starts watching, so no streams are listed here.
+# go2rtc is only reachable from the app's container: no ports are published.
+api:
+  listen: ":1984"
+rtsp:
+  listen: ""   # off
+srtp:
+  listen: ""   # off
+webrtc:
+  # Used for the connection to the printer. The STUN servers match the
+  # printer's own camera page.
+  ice_servers:
+    - urls: [stun:stun.l.google.com:19302]
+log:
+  level: info

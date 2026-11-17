@@ -36,13 +36,26 @@ These rules are enforced in the driver, not just the UI:
 
 ## Live camera
 
-Creality printers on stock firmware stream their camera over WebRTC. On the
-printer page, **Watch live** sends the browser's WebRTC offer to printer-api,
-which passes it to the printer's `http://<host>:<camera_port>/call/webrtc_local`
-(port 8000 by default) and returns the answer. That is the only thing
-printer-api does for the camera: the video itself flows from the printer
+Creality printers on stock firmware stream their camera over WebRTC. By
+default the app runs a small relay, [go2rtc](https://github.com/AlexxIT/go2rtc),
+next to printer-api. The server holds one connection to the printer's camera
+while anyone is watching, and passes the video on to every open page. The
+camera starts by itself on the printer page and the dashboard, and stops when
+you hide the tab. Browsers only talk to the app, so they need no route to the
+printer. How it works, the K1C quirks it fixes and its limits are in
+[docs/camera-relay.md](docs/camera-relay.md).
+
+printer-api allows at most one camera handshake per printer every 5 seconds
+(`CAMERA_MIN_INTERVAL`).
+
+### Direct mode (relay off)
+
+Set `GO2RTC_URL=` (empty) in `.env` to turn the relay off. On the printer page,
+**Watch live** then sends the browser's WebRTC offer to printer-api, which
+passes it to the printer's `http://<host>:<camera_port>/call/webrtc_local`
+(port 8000 by default) and returns the answer. The video flows from the printer
 straight to your browser, so your device must be able to reach the printer's
-address.
+address:
 
 - **Tailscale:** on the machine running the app, advertise a route for just the
   printer's address and approve it in the admin console:
@@ -55,10 +68,6 @@ address.
   `sudo tailscale set --accept-routes`.
 - **WireGuard:** add the printer's IP to the client's `AllowedIPs`.
 - **LAN:** nothing to do.
-
-The camera only starts when you press Watch live, stops when you leave the
-page or hide the tab, and printer-api allows at most one handshake per printer
-every 5 seconds (`CAMERA_MIN_INTERVAL`).
 
 ## Setup
 
@@ -139,6 +148,7 @@ changing a table in `api/app/db.py`, add a migration with
 | `PRINTERS_FILE` | Which printers file to mount | `./printers.yaml` |
 | `TZ` | Time zone for times in the app | `UTC` |
 | `CAMERA_MIN_INTERVAL` | Seconds between camera handshakes per printer | `5` |
+| `GO2RTC_URL` | Camera relay address; empty turns the relay off (direct mode) | `http://go2rtc:1984` |
 | `PUID` / `PGID` | User the container runs as | `1000` |
 | `IMPORT_TOKEN` | Enables the import endpoint (later version) | empty = off |
 | `TAILSCALE_SOCKET` | Device names in the action log (later version) | unset |

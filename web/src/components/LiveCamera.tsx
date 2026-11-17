@@ -1,11 +1,25 @@
 import * as React from "react";
 import { Play, Square } from "lucide-react";
+import { RelayCamera } from "@/components/RelayCamera";
 import { Button } from "@/components/ui/button";
 import { useCamera } from "@/hooks/useCamera";
+import { usePrinters } from "@/hooks/usePrinters";
 import type { Printer } from "@/lib/types";
 
-/** Video plus start / stop controls, laid over a CameraStage. */
-export function LiveCamera({ printer }: { printer: Printer }) {
+/**
+ * The camera, laid over a CameraStage. Through the server's relay when it is
+ * set up (starts by itself); otherwise straight from the printer, on a tap.
+ */
+export function LiveCamera({ printer, size = "page" }: { printer: Printer; size?: "card" | "page" }) {
+  const { config } = usePrinters();
+  if (!config) return null;
+  if (config.camera_mode === "relay") return <RelayCamera printer={printer} size={size} />;
+  if (size === "card") return null;
+  return <DirectCamera printer={printer} />;
+}
+
+/** Direct WebRTC from the printer: video plus start / stop controls. */
+function DirectCamera({ printer }: { printer: Printer }) {
   const { state, error, stream, start, stop } = useCamera(printer.id);
   const video = React.useRef<HTMLVideoElement>(null);
 

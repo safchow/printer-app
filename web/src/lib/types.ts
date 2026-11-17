@@ -38,6 +38,7 @@ export interface Printer {
   last_seen: string | null;
   updated_at: string | null;
   reconnect_seconds: number;
+  camera_mode?: "relay" | "direct";
 }
 
 export interface AppConfig {
@@ -45,4 +46,5 @@ export interface AppConfig {
   tz: string;
   controls_enabled: boolean;
   reconnect_seconds: number;
+  camera_mode?: "relay" | "direct";
 }
