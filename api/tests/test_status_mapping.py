@@ -20,8 +20,8 @@ def printing_objects(**over):
         "extruder": {"temperature": 219.8, "target": 220.0},
         "heater_bed": {"temperature": 60.1, "target": 60.0},
         "gcode_move": {"speed_factor": 1.3},
-        "output_pin fan0": {"value": 1.0},
-        "output_pin fan2": {"value": 0.4},
+        "fan_generic model_fan": {"speed": 1.0},
+        "fan_generic side_fan": {"speed": 0.4},
         "output_pin LED": {"value": 1.0},
     }
     objs.update(over)
@@ -80,5 +80,5 @@ def test_fan_object_speed():
 def test_subscription_lists_configured_objects():
     objs = subscribed_objects(CFG)
     assert {"print_stats", "virtual_sdcard", "extruder", "heater_bed", "gcode_move"} <= set(objs)
-    assert "output_pin fan0" in objs and "output_pin LED" in objs
+    assert "fan_generic model_fan" in objs and "output_pin LED" in objs
     assert all(v is None for v in objs.values())

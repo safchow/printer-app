@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 
@@ -35,7 +36,9 @@ def main(argv: list[str] | None = None) -> int:
     settings = Settings()
     print(f"BIND_ADDRESS {settings.bind_address}  PORT {settings.port}")
     print(f"DATA_DIR {settings.data_dir}  LIBRARY_ROOT {settings.library_root}  TZ {settings.tz}")
-    if settings.bind_address in ("0.0.0.0", "::"):
+    if os.path.exists("/.dockerenv"):
+        print("(inside the container it listens on every interface; compose publishes it only on BIND_ADDRESS from .env)")
+    elif settings.bind_address in ("0.0.0.0", "::"):
         print("WARNING: BIND_ADDRESS listens on every interface; use a private (VPN or LAN) address")
     try:
         printers = load_printers(settings.printers_file)
@@ -80,7 +83,8 @@ def main(argv: list[str] | None = None) -> int:
                     for o in picks:
                         print(f"    {o}")
                 elif path == "/server/info":
-                    print(f"  moonraker {result.get('moonraker_version')}, klippy {result.get('klippy_state')}")
+                    version = result.get("moonraker_version") or result.get("nexusp_version") or "unknown"
+                    print(f"  moonraker {version}, klippy {result.get('klippy_state')}")
                     print(f"  components: {', '.join(result.get('components', []))}")
                 elif path == "/printer/info":
                     print(f"  klipper {result.get('software_version')}, state {result.get('state')}")

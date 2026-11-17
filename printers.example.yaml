@@ -20,11 +20,11 @@ printers:
     cfs: true
     # Optional: bed size override in mm (x, y, z). Normally read from the printer.
     # bed_size_mm: [220, 220, 250]
-    # Klipper object names for fans and the light. These are the K1 family
-    # defaults; run `python -m app.doctor --probe` once to see your printer's.
+    # Klipper object names for fans and the light. These are a K1C's (stock
+    # firmware, Nov 2026); run `python -m app.doctor --probe` once to see yours.
     moonraker:
       fans:
-        Model fan: output_pin fan0
-        Auxiliary fan: output_pin fan2
-        Case fan: output_pin fan1
+        Model fan: fan_generic model_fan
+        Auxiliary fan: fan_generic side_fan
+        Case fan: fan_generic chassis_fan
       light: output_pin LED

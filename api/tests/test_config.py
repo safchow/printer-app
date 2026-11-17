@@ -31,7 +31,7 @@ def test_example_printers_file_loads():
     assert [p.id for p in printers] == ["k1c"]
     k1c = printers[0]
     assert k1c.type == "moonraker" and k1c.port == 7125 and k1c.cfs
-    assert k1c.moonraker.fans["Model fan"] == "output_pin fan0"
+    assert k1c.moonraker.fans["Model fan"] == "fan_generic model_fan"
     assert k1c.moonraker.light == "output_pin LED"
 
 

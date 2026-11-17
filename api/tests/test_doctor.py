@@ -13,7 +13,7 @@ def test_probe_makes_three_gentle_gets(monkeypatch, printers_file, fake_server, 
     monkeypatch.setattr(doctor.time, "sleep", lambda _: None)
     assert doctor.main(["--probe"]) == 0
     out = capsys.readouterr().out
-    assert "output_pin fan0" in out and "output_pin LED" in out
+    assert "fan_generic model_fan" in out and "output_pin LED" in out and "moonraker fake-0.1" in out
     assert fake_server.fake.http_requests == list(doctor.PROBE_PATHS)
     assert fake_server.fake.methods == []  # no websocket, no RPC
 

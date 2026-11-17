@@ -28,10 +28,14 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
+# What a real K1C (stock firmware, Creality "nexusp" Moonraker) listed on 2026-11-17.
 K1C_OBJECTS = [
-    "gcode_move", "print_stats", "virtual_sdcard", "display_status", "extruder", "heater_bed",
-    "output_pin fan0", "output_pin fan1", "output_pin fan2", "output_pin LED", "fan",
-    "temperature_sensor chamber_temp", "filament_switch_sensor filament_sensor",
+    "gcode", "webhooks", "configfile", "mcu", "mcu nozzle_mcu", "mcu leveling_mcu", "box", "cutter_module",
+    "gcode_move", "print_stats", "virtual_sdcard", "stepper_enable", "heaters",
+    "temperature_sensor chassis", "temperature_sensor main_board", "heater_bed", "pause_resume",
+    "filament_switch_sensor filament_sensor", "heater_fan hotend_fan", "fan_generic model_fan",
+    "fan_generic side_fan", "fan_generic chassis_fan", "output_pin LED", "probe", "bed_mesh",
+    "display_status", "exclude_object", "idle_timeout", "system_stats", "toolhead", "extruder",
 ]
 
 TOTAL_SECONDS = 2 * 3600 + 1 * 60  # a 2h01m job
@@ -47,11 +51,10 @@ def base_objects() -> dict[str, dict[str, Any]]:
         "extruder": {"temperature": 24.0, "target": 0.0},
         "heater_bed": {"temperature": 23.0, "target": 0.0},
         "gcode_move": {"speed_factor": 1.0},
-        "output_pin fan0": {"value": 0.0},
-        "output_pin fan1": {"value": 0.0},
-        "output_pin fan2": {"value": 0.0},
+        "fan_generic model_fan": {"speed": 0.0, "rpm": None},
+        "fan_generic side_fan": {"speed": 0.0, "rpm": None},
+        "fan_generic chassis_fan": {"speed": 0.0, "rpm": None},
         "output_pin LED": {"value": 1.0},
-        "fan": {"speed": 0.0},
     }
 
 
@@ -84,9 +87,9 @@ class FakeMoonraker:
             sd["is_active"] = name == "printing"
             o["extruder"].update(temperature=219.8, target=220.0)
             o["heater_bed"].update(temperature=60.1, target=60.0)
-            o["output_pin fan0"]["value"] = 1.0 if name == "printing" else 0.0
-            o["output_pin fan2"]["value"] = 0.4
-            o["output_pin fan1"]["value"] = 0.3
+            o["fan_generic model_fan"]["speed"] = 1.0 if name == "printing" else 0.0
+            o["fan_generic side_fan"]["speed"] = 0.4
+            o["fan_generic chassis_fan"]["speed"] = 0.3
         elif name in ("complete", "cancelled"):
             if name == "complete":
                 self._set_progress(1.0)
@@ -94,7 +97,7 @@ class FakeMoonraker:
             sd["is_active"] = False
             o["extruder"]["target"] = 0.0
             o["heater_bed"]["target"] = 0.0
-            o["output_pin fan0"]["value"] = 0.0
+            o["fan_generic model_fan"]["speed"] = 0.0
         elif name == "idle":
             o.clear()
             o.update(base_objects())
@@ -206,7 +209,7 @@ class FakeMoonraker:
             return JSONResponse({"result": data})
 
         async def server_info(r: Request):
-            return result({"klippy_connected": True, "klippy_state": "ready", "moonraker_version": "fake-0.1",
+            return result({"klippy_connected": True, "klippy_state": "ready", "nexusp_version": "fake-0.1", "api_version_string": "1.4.0",
                            "components": ["database", "file_manager", "klippy_apis", "history"]}, r.url.path)
 
         async def printer_info(r: Request):
