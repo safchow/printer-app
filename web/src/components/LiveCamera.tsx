@@ -10,7 +10,11 @@ export function LiveCamera({ printer }: { printer: Printer }) {
   const video = React.useRef<HTMLVideoElement>(null);
 
   React.useEffect(() => {
-    if (video.current) video.current.srcObject = stream;
+    const el = video.current;
+    if (!el) return;
+    el.srcObject = stream;
+    // Safari doesn't always honour autoplay for a stream set later, so ask.
+    if (stream) el.play().catch(() => {});
   }, [stream]);
 
   const offline = printer.state === "offline" || printer.state === "connecting";

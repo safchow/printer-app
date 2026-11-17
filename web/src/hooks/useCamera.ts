@@ -38,7 +38,10 @@ export function useCamera(printerId: string) {
     pcRef.current?.close();
     setError(null);
     setState("connecting");
-    const pc = new RTCPeerConnection({ iceServers: [] });
+    // Same STUN server as the K1C's own page. Without it Safari (and other
+    // browsers) only offer hidden ".local" addresses, which the printer
+    // can't resolve, so it has nowhere to send the video.
+    const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
     pcRef.current = pc;
     // The K1C only sends video when the offer is sendrecv, exactly as its own
     // page at :8000 does it. Nothing is ever sent from this side.
