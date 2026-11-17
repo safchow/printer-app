@@ -3,7 +3,7 @@ import * as React from "react";
 export type CameraState = "idle" | "connecting" | "live" | "error";
 
 /** Waits for ICE gathering so the one-shot handshake carries every candidate. */
-function gatheringDone(pc: RTCPeerConnection, ms = 2500): Promise<void> {
+function gatheringDone(pc: RTCPeerConnection, ms = 5000): Promise<void> {
   if (pc.iceGatheringState === "complete") return Promise.resolve();
   return new Promise((resolve) => {
     const t = window.setTimeout(resolve, ms);
@@ -40,7 +40,9 @@ export function useCamera(printerId: string) {
     setState("connecting");
     const pc = new RTCPeerConnection({ iceServers: [] });
     pcRef.current = pc;
-    pc.addTransceiver("video", { direction: "recvonly" });
+    // The K1C only sends video when the offer is sendrecv, exactly as its own
+    // page at :8000 does it. Nothing is ever sent from this side.
+    pc.addTransceiver("video", { direction: "sendrecv" });
     pc.ontrack = (e) => {
       setStream(e.streams[0] ?? new MediaStream([e.track]));
       setState("live");

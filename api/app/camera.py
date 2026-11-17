@@ -82,7 +82,7 @@ class CameraRelay:
         try:
             async with httpx.AsyncClient(timeout=self.timeout, transport=self.transport) as client:
                 r = await client.post(url, content=encode_offer(offer),
-                                      headers={"Content-Type": "text/plain"})
+                                      headers={"Content-Type": "plain/text"})  # what the printer's own page sends
         except httpx.HTTPError as exc:
             raise CameraError(502, f"camera unreachable ({type(exc).__name__})") from exc
         if r.status_code != 200:
