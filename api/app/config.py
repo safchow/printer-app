@@ -39,13 +39,13 @@ _SLUG = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
 
 
 class MoonrakerObjects(BaseModel):
-    """Klipper object names to read. Defaults are the Creality K1 family's names."""
+    """Klipper object names to read. Defaults are a Creality K1C's (stock firmware)."""
 
     fans: dict[str, str] = Field(
         default_factory=lambda: {
-            "Model fan": "output_pin fan0",
-            "Auxiliary fan": "output_pin fan2",
-            "Case fan": "output_pin fan1",
+            "Model fan": "fan_generic model_fan",
+            "Auxiliary fan": "fan_generic side_fan",
+            "Case fan": "fan_generic chassis_fan",
         }
     )
     light: str | None = "output_pin LED"

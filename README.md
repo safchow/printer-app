@@ -55,7 +55,7 @@ Tailscale is up. If the stack starts before Tailscale after a reboot, run
 ### Finding your printer's object names
 
 Fan and light names differ between printers. The defaults in
-`printers.example.yaml` are the Creality K1 family's. To see your printer's,
+`printers.example.yaml` are a stock-firmware K1C's. To see your printer's,
 run this **once, while the printer is idle**:
 
 ```
