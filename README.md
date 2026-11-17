@@ -5,11 +5,12 @@ page per printer, on desktop and phone. This first version shows **status
 only**. Controls, the live camera, the file library and printing from the app
 come in later versions (see the roadmap).
 
-It runs as its own Compose stack with no ties to the rest of this repo, so it
-can move to its own repository later.
+It runs as one Docker Compose stack on any machine that can reach your
+printers, and is meant to be reached over a private network (Tailscale,
+WireGuard or your LAN).
 
 ```
-printer/
+.
   compose.yaml            printer-api (+ a fake printer under the "fake" profile)
   .env.example            settings
   printers.example.yaml   your printers
