@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __doc__ as about
+from .camera import CameraError, CameraRelay, SessionDescription
 from .config import Settings, load_printers
 from .db import make_engine, migrate
 from .drivers import PrinterStatus
@@ -37,6 +38,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             log.warning("no printers configured in %s", settings.printers_file)
         hub = Hub(printers, engine, reconnect_seconds=settings.reconnect_seconds)
         app.state.hub = hub
+        app.state.camera = CameraRelay(min_interval=settings.camera_min_interval)
         hub.start()
         try:
             yield
@@ -80,6 +82,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             control.__name__ = f"control_{action}"
             return control
         app.post(f"/api/printers/{{printer_id}}/{action}", status_code=501)(make(action))
+
+    @app.post("/api/printers/{printer_id}/camera/offer", response_model=SessionDescription)
+    async def camera_offer(printer_id: str, offer: SessionDescription) -> SessionDescription:
+        driver = hub_of().get(printer_id)
+        if not driver:
+            raise HTTPException(404, "no such printer")
+        if driver.status.state in ("offline", "connecting"):
+            raise HTTPException(409, "printer is offline")
+        try:
+            return await app.state.camera.offer(driver.config, offer)
+        except CameraError as exc:
+            raise HTTPException(exc.status, exc.detail) from exc
 
     @app.websocket("/api/ws")
     async def ws(socket: WebSocket) -> None:

@@ -53,6 +53,7 @@ class PrinterStatus(BaseModel):
     fans: list[Fan] = Field(default_factory=list)
     light_on: bool | None = None
     has_camera: bool = False
+    camera: str = "none"
     cfs: bool = False
     last_seen: datetime | None = None
     updated_at: datetime | None = None
@@ -75,6 +76,7 @@ class PrinterDriver(abc.ABC):
             name=config.name,
             type=config.type,
             has_camera=config.camera != "none",
+            camera=config.camera,
             cfs=config.cfs,
             reconnect_seconds=reconnect_seconds,
         )

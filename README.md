@@ -1,9 +1,9 @@
 # Printer app
 
 A private web app for watching 3D printers: a dashboard of every printer and a
-page per printer, on desktop and phone. This first version shows **status
-only**. Controls, the live camera, the file library and printing from the app
-come in later versions (see the roadmap).
+page per printer, on desktop and phone, with the printer's live camera. It
+shows **status only** so far: controls, the file library and printing from
+the app come in later versions (see the roadmap).
 
 It runs as one Docker Compose stack on any machine that can reach your
 printers, and is meant to be reached over a private network (Tailscale,
@@ -33,6 +33,32 @@ These rules are enforced in the driver, not just the UI:
   last-seen time, and the app tries **one** reconnect every 30 seconds;
 - read-only: the only method the driver will send is `printer.objects.subscribe`.
   The control endpoints exist but return `501 Not Implemented` and never reach a printer.
+
+## Live camera
+
+Creality printers on stock firmware stream their camera over WebRTC. On the
+printer page, **Watch live** sends the browser's WebRTC offer to printer-api,
+which passes it to the printer's `http://<host>:<camera_port>/call/webrtc_local`
+(port 8000 by default) and returns the answer. That is the only thing
+printer-api does for the camera: the video itself flows from the printer
+straight to your browser, so your device must be able to reach the printer's
+address.
+
+- **Tailscale:** on the machine running the app, advertise a route for just the
+  printer's address and approve it in the admin console:
+  ```
+  echo 'net.ipv4.ip_forward = 1' | sudo tee /etc/sysctl.d/99-tailscale.conf
+  sudo sysctl -p /etc/sysctl.d/99-tailscale.conf
+  sudo tailscale set --advertise-routes=<printer-ip>/32
+  ```
+  Phones, Macs and Windows accept routes by default; Linux clients need
+  `sudo tailscale set --accept-routes`.
+- **WireGuard:** add the printer's IP to the client's `AllowedIPs`.
+- **LAN:** nothing to do.
+
+The camera only starts when you press Watch live, stops when you leave the
+page or hide the tab, and printer-api allows at most one handshake per printer
+every 5 seconds (`CAMERA_MIN_INTERVAL`).
 
 ## Setup
 
@@ -72,7 +98,7 @@ them and no retries, and prints the fans, pins, lights and heaters it finds.
 PRINTERS_FILE=./printers.fake.yaml docker compose --profile fake up -d --build
 ```
 
-The fake Moonraker plays a print. Switch states or drop it offline:
+The fake Moonraker plays a print, and a fake camera answers the handshake (no real video). Switch states or drop it offline:
 
 ```
 docker compose exec fake-moonraker python -c "import urllib.request as u; u.urlopen(u.Request('http://127.0.0.1:7125/fake/scenario/paused', method='POST'))"
@@ -112,6 +138,7 @@ changing a table in `api/app/db.py`, add a migration with
 | `LIBRARY_ROOT` | Print files (used from the library version on) | `./library` |
 | `PRINTERS_FILE` | Which printers file to mount | `./printers.yaml` |
 | `TZ` | Time zone for times in the app | `UTC` |
+| `CAMERA_MIN_INTERVAL` | Seconds between camera handshakes per printer | `5` |
 | `PUID` / `PGID` | User the container runs as | `1000` |
 | `IMPORT_TOKEN` | Enables the import endpoint (later version) | empty = off |
 | `TAILSCALE_SOCKET` | Device names in the action log (later version) | unset |

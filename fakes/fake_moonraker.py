@@ -253,12 +253,28 @@ def diff(before: dict, after: dict) -> dict:
 
 
 if __name__ == "__main__":
+    import sys
+    from pathlib import Path
+
     import uvicorn
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from fake_camera import FakeCamera
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=7125)
+    ap.add_argument("--camera-port", type=int, default=8000, help="0 = no fake camera")
     ap.add_argument("--scenario", default="printing")
     ap.add_argument("--tick", type=float, default=1.0)
     a = ap.parse_args()
-    uvicorn.run(FakeMoonraker(a.scenario, a.tick).app(), host=a.host, port=a.port, log_level="warning")
+
+    async def main() -> None:
+        servers = [uvicorn.Server(uvicorn.Config(FakeMoonraker(a.scenario, a.tick).app(), host=a.host,
+                                                 port=a.port, log_level="warning"))]
+        if a.camera_port:
+            servers.append(uvicorn.Server(uvicorn.Config(FakeCamera().app(), host=a.host,
+                                                         port=a.camera_port, log_level="warning")))
+        await asyncio.gather(*(s.serve() for s in servers))
+
+    asyncio.run(main())
