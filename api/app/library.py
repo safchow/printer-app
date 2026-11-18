@@ -2,9 +2,14 @@
 
 Rules (saf, 2026-11-17):
 - the printer announces new files on the websocket we already hold
-  (notify_filelist_changed). A file is downloaded ONCE, after it has been quiet
-  for QUIET_SECONDS (the first notice comes while it is still arriving); never
-  retried; thumbnails under .thumbs/ are ignored;
+  (notify_filelist_changed). A file is downloaded ONCE, when it has finished
+  arriving: QUIET_SECONDS after the modify_file notice that carries its full
+  size (the K1C sends create_file at ~100 KB, can then go silent for 10+ s
+  while still writing, and sends modify_file when done). A download whose size
+  doesn't match the notice is thrown away, never stored. If no modify_file
+  comes, FALLBACK_SECONDS after the last notice the file is fetched and kept
+  only if it matches the size create_file gave (plain Moonraker uploads
+  announce finished files that way). Thumbnails under .thumbs/ are ignored;
 - files are stored once by content (sha256) under LIBRARY_ROOT/files/;
   every copy is kept until it is deleted in the app; a file deleted on the
   printer stays here;
@@ -35,7 +40,8 @@ from .gcode import MAX_BYTES, TIMEOUT, gcode_url
 
 log = logging.getLogger(__name__)
 
-QUIET_SECONDS = 10.0
+QUIET_SECONDS = 3.0
+FALLBACK_SECONDS = 120.0
 SUFFIXES = (".gcode", ".3mf")
 ACTIVE = ("printing", "paused")
 ENDED = ("complete", "cancelled", "error")
@@ -69,6 +75,7 @@ class Library:
         self.root = root
         self.configs = configs
         self.quiet = QUIET_SECONDS if quiet_seconds is None else quiet_seconds
+        self._expect: dict[tuple[str, str], tuple[int | None, bool]] = {}  # (size, finished) per arriving file
         self.max_bytes = max_bytes
         self.downloads = 0
         self._pending: dict[tuple[str, str], asyncio.Task] = {}
@@ -153,15 +160,22 @@ class Library:
             return
         if action == "delete_file":
             self._cancel(printer_id, path)  # our copy, if any, stays
+            self._expect.pop((printer_id, path), None)
             return
         if action in ("create_file", "modify_file", "move_file"):
-            # Restart the quiet timer: the file is still arriving while notices keep coming.
+            size = (info.get("item") or {}).get("size")
+            size = int(size) if isinstance(size, (int, float)) and size > 0 else None
+            # modify_file means the write finished; a move is a finished file put in place.
+            finished = action in ("modify_file", "move_file")
+            self._expect[(printer_id, path)] = (size, finished)
             self._restart(printer_id, path)
 
     def _restart(self, printer_id: str, path: str) -> None:
         self._cancel(printer_id, path)
+        _, finished = self._expect.get((printer_id, path), (None, False))
+        delay = self.quiet if finished else FALLBACK_SECONDS
         self._pending[(printer_id, path)] = asyncio.create_task(
-            self._after_quiet(printer_id, path), name=f"capture:{printer_id}:{path}")
+            self._after_quiet(printer_id, path, delay), name=f"capture:{printer_id}:{path}")
 
     def _thumb_activity(self, printer_id: str, item: dict[str, Any]) -> None:
         """A slicer's thumbnail (<dir>/.thumbs/<stem>-WxH.png) arriving means its file is still arriving."""
@@ -175,7 +189,7 @@ class Library:
             if pid != printer_id:
                 continue
             head, _, name = path.rpartition("/")
-            if head == folder and name.rsplit(".", 1)[0] == stem:
+            if head == folder and name.rsplit(".", 1)[0] == stem and not self._expect.get((pid, path), (None, False))[1]:
                 self._restart(printer_id, path)
 
     def _cancel(self, printer_id: str, path: str) -> None:
@@ -183,13 +197,15 @@ class Library:
         if task and not task.done():
             task.cancel()
 
-    async def _after_quiet(self, printer_id: str, path: str) -> None:
-        await asyncio.sleep(self.quiet)
+    async def _after_quiet(self, printer_id: str, path: str, delay: float) -> None:
+        await asyncio.sleep(delay)
+        size, _ = self._expect.get((printer_id, path), (None, False))
         try:
-            await self.download(printer_id, path, source="printer")
+            await self.download(printer_id, path, source="printer", expected_size=size)
         finally:
             if self._pending.get((printer_id, path)) is asyncio.current_task():
                 self._pending.pop((printer_id, path), None)
+                self._expect.pop((printer_id, path), None)
 
     async def settled(self, printer_id: str, filename: str, timeout: float = 300.0) -> StoredFile | None:
         """The stored copy of `filename`, after any capture of it still in progress finishes."""
@@ -201,8 +217,10 @@ class Library:
                 pass
         return self.latest_named(filename)
 
-    async def download(self, printer_id: str, path: str, source: str) -> StoredFile | None:
-        """One GET of a file from the printer's G-code folder, never retried."""
+    async def download(self, printer_id: str, path: str, source: str,
+                       expected_size: int | None = None) -> StoredFile | None:
+        """One GET of a file from the printer's G-code folder, never retried. A copy whose
+        size isn't the size the printer announced is thrown away (it was still arriving)."""
         config = self.configs[printer_id]
         self.downloads += 1
         log.info("%s: capturing %s (one download)", printer_id, path)
@@ -219,6 +237,8 @@ class Library:
                             if size > self.max_bytes:
                                 raise RuntimeError(f"the file is over {self.max_bytes // (1024 * 1024)} MB")
                             f.write(chunk)
+            if expected_size is not None and size != expected_size:
+                raise RuntimeError(f"got {size} of {expected_size} bytes (still arriving?); not kept")
             row = await asyncio.to_thread(self.ingest, tmp, path, source, printer_id, True)
             self._link_open_job(printer_id, row)
             return row

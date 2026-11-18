@@ -113,10 +113,14 @@ at 200 MB. Browsers get it from printer-api, never from the printer. Set
 ## Files and history (file capture)
 
 When you send a file to the printer, Moonraker tells printer-api over the
-websocket it already has open (`notify_filelist_changed`). printer-api waits
-until the notices for that file have been quiet for 10 seconds (the first one
-comes while the file is still arriving, then the slicer's thumbnails), then
-downloads it from the printer **once** (`GET /server/files/gcodes/<file>`).
+websocket it already has open (`notify_filelist_changed`). The K1C announces the
+file (`create_file`) while it is still arriving, can then go quiet for 10+
+seconds mid-transfer, and sends `modify_file` with the full size when it's done.
+printer-api waits for that, then downloads the file from the printer **once**
+(`GET /server/files/gcodes/<file>`) and keeps it only if its size matches the
+notice; a partial copy is thrown away. If no `modify_file` ever comes, it tries
+once two minutes after the last notice and again keeps the copy only if the size
+matches what the printer announced.
 Hidden folders such as `.thumbs/` are never fetched, and only `.gcode` and
 `.3mf` files are kept.
 

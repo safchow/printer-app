@@ -306,17 +306,19 @@ class FakeMoonraker:
             except Exception:
                 pass
 
-    async def upload(self, path: str, content: bytes, gap: float = 0.05) -> None:
+    async def upload(self, path: str, content: bytes, gap: float = 0.05, silence: float | None = None) -> None:
         """Act out a Creality Print upload the way the K1C reports it: create_file while
         the file is still arriving, thumbnail churn under .thumbs/, then modify_file."""
         def item(p: str, size: int) -> dict:
             return {"root": "gcodes", "path": p, "size": size, "modified": time.time(), "permissions": "rw"}
-        await self.notify("notify_filelist_changed", [{"action": "create_file", "item": item(path, min(len(content), 102300))}])
+        first = min(len(content), 102300)
+        self.files[path] = content[: len(content) // 2]  # still arriving: a GET now gets part of it
+        await self.notify("notify_filelist_changed", [{"action": "create_file", "item": item(path, first)}])
         for px in (96, 48, 300):
             await asyncio.sleep(gap)
             thumb = f".thumbs/{path.rsplit('.', 1)[0]}-{px}x{px}.png"
             await self.notify("notify_filelist_changed", [{"action": "create_file", "item": item(thumb, 900)}])
-        await asyncio.sleep(gap)
+        await asyncio.sleep(silence if silence is not None else gap)  # the K1C can go quiet here for 10+ s
         self.files[path] = content
         await self.notify("notify_filelist_changed", [{"action": "modify_file", "item": item(path, len(content))}])
 
