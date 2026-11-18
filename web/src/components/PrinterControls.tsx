@@ -1,9 +1,11 @@
 import * as React from "react";
 import { ControlStub } from "@/components/ControlStub";
+import { Pause, Play, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ACTIVITY_LIMIT, type ActionRow } from "@/hooks/useActions";
 import type { useControl } from "@/hooks/useControl";
 import { clock, isActive } from "@/lib/format";
@@ -251,23 +253,35 @@ export function ActionButtons({ p, ctl, mobile }: { p: Printer; ctl: Ctl; mobile
   const wrap = mobile ? "w-full" : undefined;
   const pct = Math.round((p.progress ?? 0) * 100);
   const busy = !!ctl.busy;
+  // Desktop: icon buttons with a tooltip. Phone: full-width buttons with icon and word.
+  const action = (label: string, icon: React.ReactNode, variant: "outline" | "brand" | "destructive", onClick: () => void) => {
+    const button = mobile ? (
+      <Button variant={variant} disabled={!ctl.enabled || busy} className={cls} onClick={onClick}>
+        {icon}
+        {label}
+      </Button>
+    ) : (
+      <Button variant={variant} size="icon" aria-label={label} disabled={!ctl.enabled || busy} onClick={onClick}>
+        {icon}
+      </Button>
+    );
+    if (mobile || !ctl.enabled) return button;
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>{button}</TooltipTrigger>
+        <TooltipContent>{label}</TooltipContent>
+      </Tooltip>
+    );
+  };
   return (
     <>
       <Gate ctl={ctl} className={wrap}>
-        {p.state === "paused" ? (
-          <Button variant="brand" disabled={!ctl.enabled || busy} className={cls} onClick={() => ctl.run("resume")}>
-            {ctl.busy === "resume" ? "Resuming…" : "Resume"}
-          </Button>
-        ) : (
-          <Button variant="outline" disabled={!ctl.enabled || busy} className={cls} onClick={() => setConfirm("pause")}>
-            {ctl.busy === "pause" ? "Pausing…" : "Pause"}
-          </Button>
-        )}
+        {p.state === "paused"
+          ? action(ctl.busy === "resume" ? "Resuming…" : "Resume", <Play />, "brand", () => ctl.run("resume"))
+          : action(ctl.busy === "pause" ? "Pausing…" : "Pause", <Pause />, "outline", () => setConfirm("pause"))}
       </Gate>
       <Gate ctl={ctl} className={wrap}>
-        <Button variant="destructive" disabled={!ctl.enabled || busy} className={cls} onClick={() => setConfirm("cancel")}>
-          {ctl.busy === "cancel" ? "Stopping…" : "Stop"}
-        </Button>
+        {action(ctl.busy === "cancel" ? "Stopping…" : "Stop", <Square />, "destructive", () => setConfirm("cancel"))}
       </Gate>
       <Dialog open={confirm !== null} onOpenChange={(o) => !o && setConfirm(null)}>
         <DialogContent>

@@ -4,6 +4,7 @@ import { PrintView } from "@/components/PrintView";
 import { CONTROLS_OFF } from "@/components/ControlStub";
 import { ActionButtons, ActivityCard, type Ctl, ErrorLine, FansCard, LightCard, SpeedCard, TempCard } from "@/components/PrinterControls";
 import { StateBadge } from "@/components/StateBadge";
+import { AppHeader } from "@/components/AppHeader";
 import { ThemePicker } from "@/components/ThemePicker";
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
@@ -110,28 +111,23 @@ function ProgressColumn({ p }: { p: Printer }) {
 function Desktop({ p, ctl, rows }: { p: Printer; ctl: Ctl; rows: ActionRow[] }) {
   return (
     <div className="min-h-dvh">
-      <header className="flex min-h-16 flex-wrap items-center justify-between gap-3 border-b px-8 py-2.5">
-        <div className="flex min-w-0 flex-wrap items-center gap-3">
-          <Button asChild variant="outline" size="icon" aria-label="Back to dashboard">
-            <Link to="/">
-              <ChevronLeft />
-            </Link>
-          </Button>
-          <h1 className="m-0 text-xl font-semibold">{p.name}</h1>
-          <StateBadge state={p.state} />
-          {p.filename && <span className="truncate text-[13px] text-muted-foreground">{p.filename}</span>}
-        </div>
-        <div className="flex items-center gap-2">
-          <ActionButtons p={p} ctl={ctl} />
-          <ThemePicker />
-        </div>
-      </header>
+      <AppHeader />
       {/*
         Layout B, sized to the window so it fits a 14" laptop without scrolling:
         the 3D model (camera on demand) + progress on top; speed, fans,
         temperature, and light + activity below. 24 px between everything.
       */}
-      <main className="mx-auto flex h-[calc(100dvh-4rem)] min-h-[720px] w-full max-w-[1440px] flex-col gap-6 p-6">
+      <main className="mx-auto flex h-[calc(100dvh-4rem)] min-h-[720px] w-full max-w-[1440px] flex-col gap-5 p-6">
+        <div className="flex min-h-10 flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
+            <h1 className="m-0 text-xl font-semibold">{p.name}</h1>
+            <StateBadge state={p.state} />
+            {p.filename && <span className="truncate text-[13px] text-muted-foreground">{p.filename}</span>}
+          </div>
+          <div className="flex items-center gap-2">
+            <ActionButtons p={p} ctl={ctl} />
+          </div>
+        </div>
         <StatusNote p={p} />
         <ErrorLine ctl={ctl} />
         <div className="grid min-h-0 flex-1 grid-cols-[repeat(4,minmax(0,1fr))] grid-rows-[minmax(0,1.35fr)_minmax(0,1fr)] gap-6">

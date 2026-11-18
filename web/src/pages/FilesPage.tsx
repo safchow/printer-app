@@ -27,12 +27,14 @@ import { cn } from "@/lib/utils";
 function useFilter(): [FileFilter, (f: FileFilter) => void] {
   const [params, setParams] = useSearchParams();
   const label = params.get("label");
-  const filter: FileFilter = params.get("all") != null ? { kind: "all" } : label ? { kind: "label", name: label } : { kind: "inbox" };
+  // Files opens on All files; ?inbox shows the Inbox.
+  const filter: FileFilter = params.get("inbox") != null ? { kind: "inbox" } : label ? { kind: "label", name: label } : { kind: "all" };
   const set = (f: FileFilter) => {
     const next = new URLSearchParams(params);
     next.delete("label");
     next.delete("all");
-    if (f.kind === "all") next.set("all", "");
+    next.delete("inbox");
+    if (f.kind === "inbox") next.set("inbox", "");
     if (f.kind === "label") next.set("label", f.name);
     setParams(next, { replace: true });
   };
@@ -105,15 +107,15 @@ function Sidebar({ labels, filter, setFilter, total }: { labels: LabelCount[]; f
     );
   return (
     <nav aria-label="Labels" className="flex gap-1 overflow-x-auto pb-1 md:flex-col md:overflow-visible md:pb-0">
-      <button type="button" className={cn(item(filter.kind === "inbox"), "w-auto")} onClick={() => setFilter({ kind: "inbox" })}>
-        <Inbox className="size-4" aria-hidden="true" />
-        <span className="flex-1">Inbox</span>
-        {inbox > 0 && <span className="rounded-full bg-brand px-1.5 text-xs font-medium text-brand-foreground">{inbox}</span>}
-      </button>
       <button type="button" className={cn(item(filter.kind === "all"), "w-auto")} onClick={() => setFilter({ kind: "all" })}>
         <Box className="size-4" aria-hidden="true" />
         <span className="flex-1">All files</span>
         <span className="text-xs">{total}</span>
+      </button>
+      <button type="button" className={cn(item(filter.kind === "inbox"), "w-auto")} onClick={() => setFilter({ kind: "inbox" })}>
+        <Inbox className="size-4" aria-hidden="true" />
+        <span className="flex-1">Inbox</span>
+        {inbox > 0 && <span className="rounded-full bg-brand px-1.5 text-xs font-medium text-brand-foreground">{inbox}</span>}
       </button>
       {named.length > 0 && <div className="hidden px-3 pt-4 pb-1 text-xs font-medium text-muted-foreground md:block">Labels</div>}
       {named.map((l) => (
