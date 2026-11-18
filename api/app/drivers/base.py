@@ -134,6 +134,9 @@ class PrinterDriver(abc.ABC):
     # checks every printer type shares (state, limits, rate) are in
     # app/controls.py; a driver only builds and sends its own commands.
     controls_enabled = False
+    # Optional (printer id, filename, file byte position) -> (layer, total layers), for printers that
+    # don't report layers themselves. Set by the app to GcodeCache.layer_at.
+    layer_lookup: Callable[[str, str | None, int | None], tuple[int, int] | None] | None = None
 
     async def pause(self) -> str:
         raise ControlsDisabled("controls are not supported for this printer type")

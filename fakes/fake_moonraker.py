@@ -98,6 +98,10 @@ class FakeMoonraker:
                  filename: str = "phone_stand_v3.gcode", start_progress: float = 0.62,
                  print_methods: bool = True):
         self.print_methods = print_methods
+        # Klipper only reports layers when the file calls SET_PRINT_STATS_INFO; Creality Print's files
+        # don't, so the real K1C leaves print_stats.info empty. False plays that.
+        self.reports_layers = True
+        self.gcode_size = len(fake_gcode().encode())
         self.scripts: list[str] = []
         self.tick_seconds = tick_seconds
         self.filename = filename
@@ -153,7 +157,9 @@ class FakeMoonraker:
         o["display_status"]["progress"] = round(p, 4)
         o["print_stats"]["print_duration"] = round(TOTAL_SECONDS * p, 1)
         o["print_stats"]["total_duration"] = round(TOTAL_SECONDS * p + 95, 1)
-        o["print_stats"]["info"] = {"current_layer": max(1, int(TOTAL_LAYERS * p)), "total_layer": TOTAL_LAYERS}
+        o["virtual_sdcard"]["file_position"] = int(self.gcode_size * p)
+        if self.reports_layers:
+            o["print_stats"]["info"] = {"current_layer": max(1, int(TOTAL_LAYERS * p)), "total_layer": TOTAL_LAYERS}
 
     def tick(self) -> dict[str, dict[str, Any]]:
         """Advance the simulated job by one step and return what changed."""

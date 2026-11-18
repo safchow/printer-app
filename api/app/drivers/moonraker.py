@@ -148,6 +148,11 @@ def apply_objects(status: PrinterStatus, objects: dict[str, dict[str, Any]],
     })
 
 
+def objects_file_position(objects: dict[str, dict[str, Any]]) -> int | None:
+    pos = _num(objects.get("virtual_sdcard", {}).get("file_position"))
+    return None if pos is None else int(pos)
+
+
 def _deep_merge(into: dict[str, Any], new: dict[str, Any]) -> None:
     for key, value in new.items():
         if isinstance(value, dict) and isinstance(into.get(key), dict):
@@ -248,7 +253,13 @@ class MoonrakerDriver(PrinterDriver):
                 await self._notice(msg["method"], msg.get("params"))
 
     async def _publish(self) -> None:
-        self.status = apply_objects(self.status, self._objects, self.config)
+        status = apply_objects(self.status, self._objects, self.config)
+        if status.total_layers is None and status.filename and self.layer_lookup:
+            pos = objects_file_position(self._objects)
+            found = self.layer_lookup(self.config.id, status.filename, pos)
+            if found:
+                status = status.model_copy(update={"layer": found[0], "total_layers": found[1]})
+        self.status = status
         await self._emit()
 
     async def _mark_offline(self, reason: str) -> None:
