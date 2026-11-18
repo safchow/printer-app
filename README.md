@@ -453,3 +453,8 @@ changing a table in `api/app/db.py`, add a migration with
 | `PUID` / `PGID` | User the container runs as | `1000` |
 | `IMPORT_TOKEN` | Enables the import endpoint (later version) | empty = off |
 | `TAILSCALE_SOCKET` | Device names in the action log (later version) | unset |
+
+## License
+
+[MIT](LICENSE). The app controls real hardware: use it at your own risk, and
+keep an eye on your printer.
