@@ -11,7 +11,9 @@ Rules (one download per print):
 from __future__ import annotations
 
 import asyncio
+import bisect
 import json
+import re
 import logging
 import shutil
 from datetime import datetime
@@ -29,6 +31,16 @@ MAX_BYTES = 200 * 1024 * 1024
 TIMEOUT = httpx.Timeout(30.0, read=60.0)
 # Two sightings of the same file count as the same print if their start times are this close.
 SAME_PRINT_SECONDS = 300
+# Slicer comments that start a layer (PrusaSlicer/Orca/Creality Print, Cura), and header lines with the count.
+LAYER_MARK = re.compile(rb"^;(?:LAYER_CHANGE|LAYER:-?\d+)\s*$", re.M)
+TOTAL_MARK = re.compile(rb"^;\s*(?:total layer number|total layers count|LAYER_COUNT)\s*[:=]\s*(\d+)", re.M | re.I)
+
+
+def layer_offsets(data: bytes) -> tuple[list[int], int | None]:
+    """Byte offsets where each layer starts, and the layer count the header states (if any)."""
+    offsets = [m.start() for m in LAYER_MARK.finditer(data)]
+    m = TOTAL_MARK.search(data, 0, 64 * 1024)
+    return offsets, int(m.group(1)) if m else None
 
 
 def gcode_url(config: PrinterConfig, filename: str) -> str:
@@ -48,6 +60,9 @@ class GcodeCache:
         # File capture (app/library.py), when on: a file it already holds isn't downloaded again,
         # and a file fetched here is kept there too.
         self.library = library
+        # printer -> (filename, size, layer start offsets, total): built once per cached file.
+        self._layers: dict[str, tuple[str, int, list[int], int]] = {}
+        self._indexing: dict[str, asyncio.Task] = {}
 
     def _dir(self, printer_id: str) -> Path:
         return self.root / printer_id
@@ -82,8 +97,45 @@ class GcodeCache:
     def ready(self, status: PrinterStatus) -> bool:
         return self.info(status)["state"] == "ready"
 
+    def layer_at(self, printer_id: str, filename: str | None, file_position: int | None) -> tuple[int, int] | None:
+        """(current layer, total layers) worked out from the cached G-code and how far the printer has read it.
+
+        For printers that don't report layers themselves: Klipper only knows them when the file calls
+        SET_PRINT_STATS_INFO, and Creality Print doesn't. Reads nothing from the printer.
+        """
+        index = self._layers.get(printer_id)
+        if not index or index[0] != filename or file_position is None:
+            return None
+        offsets, total = index[2], index[3]
+        return min(bisect.bisect_right(offsets, file_position), total), total
+
+    def _index(self, printer_id: str) -> None:
+        meta = self.meta(printer_id) or {}
+        path = self.path(printer_id)
+        if "size" not in meta or not path.is_file():
+            return
+        cur = self._layers.get(printer_id)
+        if cur and cur[0] == meta["filename"] and cur[1] == meta["size"]:
+            return
+        offsets, stated = layer_offsets(path.read_bytes())
+        total = stated or len(offsets)
+        if total:
+            self._layers[printer_id] = (meta["filename"], meta["size"], offsets, total)
+            log.info("%s: %d layers in %s (%d marks)", printer_id, total, meta["filename"], len(offsets))
+
+    def _start_index(self, printer_id: str) -> None:
+        task = self._indexing.get(printer_id)
+        if task and not task.done():
+            return
+        self._indexing[printer_id] = asyncio.create_task(asyncio.to_thread(self._index, printer_id),
+                                                         name=f"layers:{printer_id}")
+
     async def on_status(self, status: PrinterStatus) -> None:
         """Called on every status update; starts the one download for a new print."""
+        if status.state in ("printing", "paused") and status.total_layers is None and self.ready(status):
+            index = self._layers.get(status.id)
+            if not index or index[0] != status.filename:
+                self._start_index(status.id)
         if status.state not in ("printing", "paused"):
             if status.state not in ("offline", "connecting"):
                 self._tried.pop(status.id, None)  # that print is over; the next one is new
@@ -155,9 +207,9 @@ class GcodeCache:
         (folder / "meta.json").write_text(json.dumps(meta))
 
     async def stop(self) -> None:
-        for task in self._tasks.values():
+        for task in [*self._tasks.values(), *self._indexing.values()]:
             task.cancel()
-        for task in self._tasks.values():
+        for task in [*self._tasks.values(), *self._indexing.values()]:
             try:
                 await task
             except (asyncio.CancelledError, Exception):

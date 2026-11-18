@@ -81,6 +81,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 driver.on_status(library.on_status)
             if settings.gcode_preview:
                 driver.on_status(app.state.gcode.on_status)
+                driver.layer_lookup = app.state.gcode.layer_at
         app.state.camera = CameraRelay(min_interval=settings.camera_min_interval)
         app.state.go2rtc = (Go2rtc(settings.go2rtc_url, settings.camera_callback_url, settings.data_dir)
                             if settings.go2rtc_url else None)

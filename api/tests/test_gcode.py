@@ -76,3 +76,29 @@ def test_url_stays_under_gcodes():
     assert gcode_url(cfg, "a b.gcode") == "http://10.0.0.5:7125/server/files/gcodes/a%20b.gcode"
     assert gcode_url(cfg, "../../etc/passwd") == "http://10.0.0.5:7125/server/files/gcodes/etc/passwd"
     assert gcode_url(cfg, "sub/x?.gcode") == "http://10.0.0.5:7125/server/files/gcodes/sub/x%3F.gcode"
+
+
+def test_layer_offsets_and_lookup(tmp_path):
+    from app.gcode import GcodeCache, layer_offsets
+    data = b"; total layer number: 3\nG28\n;LAYER_CHANGE\nG1 Z0.2\n;LAYER_CHANGE\nG1 Z0.4\n;LAYER_CHANGE\nG1 Z0.6\n"
+    offsets, total = layer_offsets(data)
+    assert total == 3 and len(offsets) == 3
+    cache = GcodeCache(tmp_path, {})
+    cache._layers["k1c"] = ("a.gcode", len(data), offsets, total)
+    assert cache.layer_at("k1c", "a.gcode", 0) == (0, 3)  # still in the start G-code
+    assert cache.layer_at("k1c", "a.gcode", offsets[1] + 1) == (2, 3)
+    assert cache.layer_at("k1c", "a.gcode", len(data)) == (3, 3)
+    assert cache.layer_at("k1c", "other.gcode", 10) is None  # a different print
+    assert cache.layer_at("k1c", "a.gcode", None) is None
+    # Cura-style marks, no header count.
+    assert layer_offsets(b";LAYER:0\nG1\n;LAYER:1\nG1\n")[0] == [0, 12]
+
+
+def test_layers_from_the_file_when_the_printer_reports_none(tmp_path, printers_file, fake_server):
+    fake_server.fake.reports_layers = False
+    fake_server.scenario("idle")
+    fake_server.scenario("printing")
+    with TestClient(create_app(make(tmp_path, printers_file))) as c:
+        wait_for_sync(lambda: c.get("/api/printers/k1c").json()["total_layers"] == 120)
+        p = c.get("/api/printers/k1c").json()
+        assert 60 <= p["layer"] <= 90  # the fake starts at 62% of the file
