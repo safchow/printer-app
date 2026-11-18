@@ -101,7 +101,7 @@ export function HistoryPage() {
                       <SmallThumb job={j} />
                       <div className="min-w-0 flex-1">
                         {j.file_id != null ? (
-                          <Link to={`/files?all&file=${j.file_id}`} className="text-foreground no-underline hover:underline">
+                          <Link to={`/files?file=${j.file_id}`} className="text-foreground no-underline hover:underline">
                             {file}
                           </Link>
                         ) : (

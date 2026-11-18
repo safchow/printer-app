@@ -1,4 +1,4 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { Printer as PrinterIcon } from "lucide-react";
 import { ThemePicker } from "@/components/ThemePicker";
 import { usePrinters, useNow } from "@/hooks/usePrinters";
@@ -18,6 +18,8 @@ function Freshness() {
 }
 
 export function AppHeader() {
+  // A printer's page counts as part of the dashboard.
+  const onPrinter = useLocation().pathname.startsWith("/printers/");
   const link = ({ isActive }: { isActive: boolean }) =>
     cn("rounded-md px-3 py-2 text-sm no-underline", isActive ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground");
   return (
@@ -30,7 +32,7 @@ export function AppHeader() {
           Printers
         </span>
         <nav aria-label="Main" className="flex gap-1">
-          <NavLink to="/" end className={link}>
+          <NavLink to="/" end className={({ isActive }) => link({ isActive: isActive || onPrinter })}>
             Dashboard
           </NavLink>
           <NavLink to="/files" className={link}>
