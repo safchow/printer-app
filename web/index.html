@@ -8,12 +8,17 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <title>Printers</title>
     <script>
-      // Apply the saved theme before first paint so there is no flash.
+      // Paint the last theme before first paint so there is no flash (src/hooks/useTheme.tsx).
       try {
-        var t = JSON.parse(localStorage.getItem("printer-theme") || "{}");
-        var dark = t.mode === "dark" || ((!t.mode || t.mode === "system") && matchMedia("(prefers-color-scheme: dark)").matches);
-        document.documentElement.classList.toggle("dark", dark);
-        document.documentElement.dataset.accent = t.accent || "blue";
+        var a = JSON.parse(localStorage.getItem("printer-theme-applied") || "null");
+        var root = document.documentElement;
+        if (a && a.vars) {
+          for (var k in a.vars) root.style.setProperty(k, a.vars[k]);
+          root.classList.toggle("dark", !!a.dark);
+          document.querySelector('meta[name="theme-color"]').setAttribute("content", a.vars["--background"]);
+        } else {
+          root.classList.toggle("dark", matchMedia("(prefers-color-scheme: dark)").matches);
+        }
       } catch (e) {}
     </script>
   </head>

@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     data_dir: Path = Path("./data")
     library_root: Path = Path("./library")
     printers_file: Path = Path("./printers.yaml")
+    # Your own colour themes (app/themes.py). Empty = DATA_DIR/themes.yaml.
+    themes_file: Path | None = None
     tz: str = "UTC"
     import_token: str = ""
     tailscale_socket: str = ""
@@ -39,6 +41,11 @@ class Settings(BaseSettings):
     # How go2rtc reaches this app (the handshake goes through here).
     camera_callback_url: str = "http://printer-api:8090"
     static_dir: Path | None = None
+
+    @field_validator("themes_file", mode="before")
+    @classmethod
+    def _empty_is_default(cls, v):
+        return None if v in ("", None) else v
 
     @property
     def database_url(self) -> str:

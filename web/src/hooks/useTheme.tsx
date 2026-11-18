@@ -1,41 +1,77 @@
 import * as React from "react";
+import { useJson } from "@/lib/files";
 
-export type Mode = "system" | "light" | "dark";
-export const ACCENTS = [
-  { id: "zinc", name: "Zinc", light: "#3f3f46", dark: "#d4d4d8" },
-  { id: "blue", name: "Blue", light: "#2563eb", dark: "#2563eb" },
-  { id: "violet", name: "Violet", light: "#7c3aed", dark: "#7c3aed" },
-  { id: "green", name: "Green", light: "#15803d", dark: "#15803d" },
-  { id: "orange", name: "Orange", light: "#c2410c", dark: "#c2410c" },
-  { id: "rose", name: "Rose", light: "#e11d48", dark: "#e11d48" },
-] as const;
-export type Accent = (typeof ACCENTS)[number]["id"];
+/** One theme from /api/themes (api/app/themes/base.yaml plus the user's themes file). */
+export interface ThemeDef {
+  id: string;
+  name: string;
+  mode: "light" | "dark";
+  radius: number;
+  font: "inter" | "system" | "mono" | "serif";
+  source: "base" | "user" | "edited";
+  colors: Record<string, string>;
+}
+
+export interface ThemeList {
+  default: { light: string; dark: string };
+  themes: ThemeDef[];
+}
+
+/** "system" follows the device: default.light or default.dark. */
+export type Choice = "system" | string;
 
 interface Theme {
-  mode: Mode;
-  accent: Accent;
+  choice: Choice;
+  /** The theme in use (null until the list has loaded). */
+  active: ThemeDef | null;
   dark: boolean;
-  setMode: (m: Mode) => void;
-  setAccent: (a: Accent) => void;
+  list: ThemeList | null;
+  setChoice: (c: Choice) => void;
 }
 
 const KEY = "printer-theme";
+/** The CSS variables last applied, so index.html can paint them before React starts. */
+const APPLIED = "printer-theme-applied";
 const ThemeContext = React.createContext<Theme | null>(null);
 
-function load(): { mode: Mode; accent: Accent } {
+const FONTS: Record<ThemeDef["font"], string> = {
+  inter: '"Inter Variable", ui-sans-serif, system-ui, sans-serif',
+  system: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+  mono: '"Geist Mono", ui-monospace, monospace',
+  serif: 'ui-serif, Georgia, Cambria, "Times New Roman", serif',
+};
+
+/** A theme's CSS variables: background -> --background, accent -> --brand. */
+export function themeVars(t: ThemeDef): Record<string, string> {
+  const vars: Record<string, string> = {};
+  for (const [k, v] of Object.entries(t.colors)) {
+    vars[`--${k.replace(/^accent/, "brand").replace(/_/g, "-")}`] = v;
+  }
+  vars["--radius"] = `${t.radius / 16}rem`;
+  vars["--app-font"] = FONTS[t.font] ?? FONTS.inter;
+  return vars;
+}
+
+function loadChoice(): Choice {
   try {
     const t = JSON.parse(localStorage.getItem(KEY) || "{}");
-    return {
-      mode: ["system", "light", "dark"].includes(t.mode) ? t.mode : "system",
-      accent: ACCENTS.some((a) => a.id === t.accent) ? t.accent : "blue",
-    };
+    return typeof t.theme === "string" && t.theme ? t.theme : "system";
   } catch {
-    return { mode: "system", accent: "blue" };
+    return "system";
+  }
+}
+
+function save(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* private mode: the theme just isn't remembered */
   }
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = React.useState(load);
+  const { data: list } = useJson<ThemeList>("/api/themes");
+  const [choice, setChoice] = React.useState(loadChoice);
   const [systemDark, setSystemDark] = React.useState(() => matchMedia("(prefers-color-scheme: dark)").matches);
 
   React.useEffect(() => {
@@ -45,29 +81,31 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     return () => mq.removeEventListener("change", on);
   }, []);
 
-  const dark = state.mode === "dark" || (state.mode === "system" && systemDark);
+  const active = React.useMemo(() => {
+    if (!list?.themes.length) return null;
+    const find = (id: string) => list.themes.find((t) => t.id === id);
+    const fallback = find(systemDark ? list.default.dark : list.default.light) ?? list.themes[0];
+    // A theme removed from the file since it was picked falls back to System.
+    return (choice !== "system" && find(choice)) || fallback;
+  }, [list, choice, systemDark]);
 
-  React.useEffect(() => {
+  // Before the list loads, keep whatever index.html painted from the last visit.
+  const dark = active ? active.mode === "dark" : document.documentElement.classList.contains("dark");
+
+  // A layout effect, so the variables are in place before children's effects read them (the 3D view).
+  React.useLayoutEffect(() => {
+    if (!active) return;
     const root = document.documentElement;
-    root.classList.toggle("dark", dark);
-    root.dataset.accent = state.accent;
-    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", dark ? "#09090b" : "#ffffff");
-    try {
-      localStorage.setItem(KEY, JSON.stringify(state));
-    } catch {
-      /* private mode: the theme just isn't remembered */
-    }
-  }, [state, dark]);
+    const vars = themeVars(active);
+    for (const [k, v] of Object.entries(vars)) root.style.setProperty(k, v);
+    root.classList.toggle("dark", active.mode === "dark");
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", active.colors.background);
+    save(APPLIED, { dark: active.mode === "dark", vars });
+  }, [active]);
 
-  const value = React.useMemo<Theme>(
-    () => ({
-      ...state,
-      dark,
-      setMode: (mode) => setState((s) => ({ ...s, mode })),
-      setAccent: (accent) => setState((s) => ({ ...s, accent })),
-    }),
-    [state, dark],
-  );
+  React.useEffect(() => save(KEY, { theme: choice }), [choice]);
+
+  const value = React.useMemo<Theme>(() => ({ choice, active, dark, list, setChoice }), [choice, active, dark, list]);
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 

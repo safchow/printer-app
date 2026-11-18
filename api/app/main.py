@@ -24,6 +24,7 @@ from .controls import Controls
 from .drivers.base import ControlError, ControlsDisabled
 from .gcode import GcodeCache
 from .library import Library
+from .themes import ThemeStore
 from .hub import Hub
 from .relay import Go2rtc, decode_go2rtc_offer, encode_answer, fix_answer, fix_offer, pump
 
@@ -108,6 +109,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "reconnect_seconds": settings.reconnect_seconds,
                 "camera_mode": "relay" if settings.go2rtc_url else "direct",
                 "capture_files": bool(getattr(app.state, "library", None))}
+
+    themes = ThemeStore(settings.themes_file or settings.data_dir / "themes.yaml")
+
+    @app.get("/api/themes")
+    def list_themes() -> dict:
+        """Base themes merged with the user's themes file. Reloaded when either changes."""
+        return themes.get().public()
 
     @app.get("/api/printers", response_model=list[PrinterStatus])
     def list_printers() -> list[PrinterStatus]:

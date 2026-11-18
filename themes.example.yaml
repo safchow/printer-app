@@ -1,0 +1,30 @@
+# Your own colour themes. Copy to ./data/themes.yaml (DATA_DIR/themes.yaml),
+# or set THEMES_FILE when running without Docker. Changes show on the next
+# page load. Every colour name is listed at the top of api/app/themes/base.yaml.
+version: 1
+
+# Optional: which themes "System" uses for your device's light and dark modes.
+default:
+  light: paper-teal
+  dark: carbon-spool
+
+themes:
+  # A new theme built on a base one: only what differs.
+  - id: carbon-spool
+    name: Carbon spool
+    mode: dark
+    extends: carbon-teal
+    radius: 6
+    colors:
+      accent: "#14b8a6"
+      stage: "#0e1514"
+
+  # A theme from scratch needs only background, foreground and accent.
+  - id: workshop
+    name: Workshop
+    mode: light
+    font: system
+    colors:
+      background: "#f7f5f0"
+      foreground: "#1c1917"
+      accent: "#c2410c"

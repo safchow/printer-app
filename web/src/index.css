@@ -5,7 +5,8 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* shadcn/ui zinc theme, light and dark, plus a user-picked accent. */
+/* Fallback colours (Daylight and Zinc) until /api/themes loads. The picked
+   theme sets these same variables on <html> (src/hooks/useTheme.tsx). */
 :root {
   --background: #ffffff;
   --foreground: #09090b;
@@ -24,6 +25,7 @@
   --input: #e4e4e7;
   --ring: #a1a1aa;
   --destructive: #b91c1c;
+  --destructive-foreground: #ffffff;
   --warn: #fffbeb;
   --warn-foreground: #92400e;
   --offline: #fef2f2;
@@ -31,6 +33,7 @@
   --brand: #2563eb;
   --brand-foreground: #ffffff;
   --radius: 0.625rem;
+  --app-font: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
 }
 
 .dark {
@@ -50,23 +53,16 @@
   --border: #27272a;
   --input: #27272a;
   --ring: #52525b;
-  --destructive: #b91c1c;
+  --destructive: #f87171;
+  --destructive-foreground: #09090b;
   --warn: #451a03;
   --warn-foreground: #fcd34d;
   --offline: #450a0a;
   --offline-foreground: #fca5a5;
 }
 
-[data-accent="zinc"] { --brand: #3f3f46; }
-.dark[data-accent="zinc"] { --brand: #d4d4d8; --brand-foreground: #09090b; }
-[data-accent="blue"] { --brand: #2563eb; }
-[data-accent="violet"] { --brand: #7c3aed; }
-[data-accent="green"] { --brand: #15803d; }
-[data-accent="orange"] { --brand: #c2410c; }
-[data-accent="rose"] { --brand: #e11d48; }
-
 @theme inline {
-  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--app-font);
   --font-mono: "Geist Mono", ui-monospace, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -85,6 +81,7 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-warn: var(--warn);
   --color-warn-foreground: var(--warn-foreground);
   --color-offline: var(--offline);
