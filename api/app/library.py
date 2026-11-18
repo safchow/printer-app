@@ -42,6 +42,11 @@ log = logging.getLogger(__name__)
 
 QUIET_SECONDS = 3.0
 FALLBACK_SECONDS = 120.0
+# A print is only taken as over without an end state (complete/cancelled/error) after the
+# printer has looked idle this long: right after a reconnect it briefly reports no print.
+IDLE_END_SECONDS = 60.0
+# A print seen again with the same file and a start time this close is the same print.
+SAME_PRINT_SECONDS = 300.0
 SUFFIXES = (".gcode", ".3mf")
 ACTIVE = ("printing", "paused")
 ENDED = ("complete", "cancelled", "error")
@@ -81,6 +86,7 @@ class Library:
         self._pending: dict[tuple[str, str], asyncio.Task] = {}
         self._jobs: dict[str, int] = {}  # printer -> open print_job id
         self._seen: dict[str, tuple[bool, str | None]] = {}
+        self._idle: dict[str, asyncio.Task] = {}  # printer -> pending "it ended unseen" close
         (root / "files").mkdir(parents=True, exist_ok=True)
         (root / "thumbs").mkdir(parents=True, exist_ok=True)
 
@@ -258,6 +264,21 @@ class Library:
                          .order_by(PrintJob.id.desc())).first()
         return job if job and job.ended_at is None else None
 
+    def _same_print(self, s: Session, status: PrinterStatus) -> PrintJob | None:
+        """The newest job for this printer and file that started within SAME_PRINT_SECONDS of this
+        print and wasn't seen to finish: the same print, seen again (e.g. after a restart)."""
+        job = s.exec(select(PrintJob).where(PrintJob.printer_id == status.id)
+                     .order_by(PrintJob.id.desc())).first()
+        if not job or job.filename != status.filename or job.result not in ("printing", "unknown"):
+            return None
+        started = _utc(status.started_at) or now()
+        return job if abs((_utc(job.started_at) - started).total_seconds()) < SAME_PRINT_SECONDS else None
+
+    def _cancel_idle(self, printer_id: str) -> None:
+        task = self._idle.pop(printer_id, None)
+        if task and not task.done():
+            task.cancel()
+
     async def on_status(self, status: PrinterStatus) -> None:
         if status.state in ("offline", "connecting"):
             return  # a dropped connection doesn't end a print
@@ -269,12 +290,22 @@ class Library:
         with Session(self.engine) as s:
             job = self._open_job(s, status.id)
             if status.state in ACTIVE and status.filename:
+                self._cancel_idle(status.id)
                 if job and job.filename == status.filename:
                     self._jobs[status.id] = job.id
                     return
                 if job:  # a different file is printing: the old job's end was missed
                     job.ended_at, job.result = now(), "unknown"
                     s.add(job)
+                    s.commit()
+                again = self._same_print(s, status)
+                if again:  # closed too early (an idle blip, a restart): carry on with it
+                    again.ended_at, again.result, again.print_duration = None, "printing", None
+                    s.add(again)
+                    s.commit()
+                    self._jobs[status.id] = again.id
+                    log.info("%s: print continues: %s", status.id, status.filename)
+                    return
                 f = self.latest_named(status.filename)
                 job = PrintJob(printer_id=status.id, filename=status.filename, file_id=f.id if f else None,
                                started_at=status.started_at or now(), result="printing")
@@ -283,17 +314,33 @@ class Library:
                 s.refresh(job)
                 self._jobs[status.id] = job.id
                 log.info("%s: print started: %s", status.id, status.filename)
-            elif job:
-                if status.state in ENDED:
-                    job.result = status.state
-                else:  # idle without seeing the end state
-                    job.result = "unknown"
-                job.ended_at = now()
-                job.print_duration = status.print_duration
-                s.add(job)
-                s.commit()
-                self._jobs.pop(status.id, None)
-                log.info("%s: print ended (%s): %s", status.id, job.result, job.filename)
+            elif job and status.state in ENDED:
+                self._cancel_idle(status.id)
+                self._close(s, job, status.state, status.print_duration)
+            elif job and status.id not in self._idle:
+                # Idle without an end state: only believe it if it lasts.
+                self._idle[status.id] = asyncio.create_task(
+                    self._close_if_still_idle(status.id, now()), name=f"idle:{status.id}")
+
+    def _close(self, s: Session, job: PrintJob, result: str, print_duration: float | None,
+               ended_at: datetime | None = None) -> None:
+        job.result = result
+        job.ended_at = ended_at or now()
+        if print_duration:
+            job.print_duration = print_duration
+        s.add(job)
+        s.commit()
+        self._jobs.pop(job.printer_id, None)
+        log.info("%s: print ended (%s): %s", job.printer_id, result, job.filename)
+
+    async def _close_if_still_idle(self, printer_id: str, since: datetime) -> None:
+        await asyncio.sleep(IDLE_END_SECONDS)
+        if self._idle.get(printer_id) is asyncio.current_task():
+            self._idle.pop(printer_id, None)
+        with Session(self.engine) as s:
+            job = self._open_job(s, printer_id)
+            if job:
+                self._close(s, job, "unknown", None, ended_at=since)
 
     def _link_open_job(self, printer_id: str, f: StoredFile) -> None:
         with Session(self.engine) as s:
@@ -404,7 +451,7 @@ class Library:
             return [self.job_dict(j) for j in jobs]
 
     async def stop(self) -> None:
-        tasks = list(self._pending.values())
+        tasks = list(self._pending.values()) + list(self._idle.values())
         for t in tasks:
             t.cancel()
         for t in tasks:

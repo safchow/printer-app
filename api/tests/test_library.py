@@ -2,6 +2,7 @@
 
 import base64
 import time
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -187,3 +188,44 @@ def test_a_copy_of_the_wrong_size_is_not_kept(client, fake_server):
     wait_for_sync(lambda: fetched(fake_server, "partial.gcode") == 1, timeout=5)
     time.sleep(0.5)
     assert not any(f["filename"] == "partial.gcode" for f in files(client))
+
+
+def test_a_blip_of_idle_mid_print_is_still_one_print(client, fake_server, monkeypatch):
+    # On 2026-11-17 a restart mid-print showed one status with no print, then "printing" again
+    # 8 ms later; that split one print into two history rows.
+    monkeypatch.setattr(library_mod, "IDLE_END_SECONDS", 0.5)
+    wait_for_sync(lambda: len(client.get("/api/history").json()) == 1)
+    lib = client.app.state.library
+    running = lib._seen["k1c"]
+    assert running[0] is True
+    from app.drivers import PrinterStatus
+    base = PrinterStatus(id="k1c", name="K1C", type="moonraker", state="idle")
+    client.portal.call(lib.on_status, base)
+    printing = base.model_copy(update={"state": "printing", "filename": running[1],
+                                       "started_at": datetime.now(timezone.utc) - timedelta(seconds=30)})
+    client.portal.call(lib.on_status, printing)
+    time.sleep(0.8)
+    jobs = client.get("/api/history").json()
+    assert len(jobs) == 1 and jobs[0]["result"] == "printing" and jobs[0]["ended_at"] is None
+
+
+def test_a_job_closed_too_early_is_continued_not_duplicated(client, fake_server):
+    # The restart case: the old app closed the job as "unknown"; the new one sees the print again.
+    wait_for_sync(lambda: len(client.get("/api/history").json()) == 1)
+    lib = client.app.state.library
+    filename = lib._seen["k1c"][1]
+    from sqlmodel import Session
+    from app.db import PrintJob
+    with Session(lib.engine) as s:
+        job = s.get(PrintJob, client.get("/api/history").json()[0]["id"])
+        lib._close(s, job, "unknown", None)
+        started = library_mod._utc(job.started_at)
+    lib._seen.clear()  # as after a restart
+    from app.drivers import PrinterStatus
+    printing = PrinterStatus(id="k1c", name="K1C", type="moonraker", state="printing", filename=filename,
+                             started_at=started + timedelta(seconds=0.2))
+    client.portal.call(lib.on_status, printing)
+    jobs = client.get("/api/history").json()
+    assert len(jobs) == 1 and jobs[0]["result"] == "printing" and jobs[0]["ended_at"] is None
+    wait_for_sync(lambda: client.get("/api/history").json()[0]["file_id"] is not None)
+    assert client.get(f"/api/files/{jobs[0]['file_id'] or client.get('/api/history').json()[0]['file_id']}").json()["prints"] == 1
