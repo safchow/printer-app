@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { parseGcode, printedCount, type Toolpath } from "@/lib/gcode";
 import type { Printer } from "@/lib/types";
+import { useTheme } from "@/hooks/useTheme";
 import { cn } from "@/lib/utils";
 
 type Info =
@@ -101,6 +102,8 @@ function Scene({
 }) {
   const host = React.useRef<HTMLDivElement>(null);
   const api = React.useRef<{ setDone: (k: number) => void } | null>(null);
+  // Colours come from the theme's CSS variables: draw again when it changes.
+  const themeId = useTheme().active?.id;
 
   React.useEffect(() => {
     const el = host.current;
@@ -221,12 +224,12 @@ function Scene({
       renderer.dispose();
       renderer.domElement.remove();
     };
-  }, [tp, interactive, byHeight]);
+  }, [tp, interactive, byHeight, themeId]);
 
   const k = printedCount(tp, progress * size);
   React.useEffect(() => {
     api.current?.setDone(k);
-  }, [k, tp]);
+  }, [k, tp, themeId]);
 
   return (
     <div
