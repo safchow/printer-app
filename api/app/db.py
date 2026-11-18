@@ -38,7 +38,7 @@ class ActionLog(SQLModel, table=True):
 
 
 class Label(SQLModel, table=True):
-    """A name saf sorts captured files under."""
+    """A name the user sorts captured files under."""
 
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(unique=True)

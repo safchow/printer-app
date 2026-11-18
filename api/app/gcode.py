@@ -1,6 +1,6 @@
 """The G-code of the current print, fetched once per print for the 3D toolpath preview.
 
-Rules (saf approved one download per print, 2026-11-17):
+Rules (one download per print):
 - one GET to the printer's own Moonraker, `/server/files/gcodes/<file>`, when a
   print is seen that isn't cached yet; never retried, even if it fails;
 - one download at a time per printer, capped at MAX_BYTES;
