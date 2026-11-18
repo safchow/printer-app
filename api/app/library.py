@@ -1,6 +1,6 @@
 """File capture: keep a copy of every print file that reaches the printer, plus print history.
 
-Rules (saf, 2026-11-17):
+Rules:
 - the printer announces new files on the websocket we already hold
   (notify_filelist_changed). A file is downloaded ONCE, when it has finished
   arriving: QUIET_SECONDS after the modify_file notice that carries its full
@@ -13,7 +13,7 @@ Rules (saf, 2026-11-17):
 - files are stored once by content (sha256) under LIBRARY_ROOT/files/;
   every copy is kept until it is deleted in the app; a file deleted on the
   printer stays here;
-- new files have no label (the Inbox) until saf gives them one;
+- new files have no label (the Inbox) until the user gives them one;
 - each print the app watches becomes a print_job row; the app never starts one.
 """
 

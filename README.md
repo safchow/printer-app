@@ -1,25 +1,244 @@
 # Printer app
 
-A private web app for watching and controlling 3D printers: a dashboard of
-every printer and a page per printer, on desktop and phone, with the printer's
-live camera and its controls, with a 3D view of each print. It also keeps a
-copy of every file you send to the printer (from Creality Print as usual), lets
-you sort them with labels and records each print. The app doesn't upload or
-start prints; there is no upload flow.
+A self-hosted web app for watching and controlling 3D printers on your home
+network. It gives you a dashboard of every printer and a page per printer, on
+desktop and phone, with a 3D view of the print in progress, the printer's live
+camera and its controls. It also keeps a copy of every file you send to the
+printer from your slicer, lets you sort them with labels, and records every
+print.
 
-It runs as one Docker Compose stack on any machine that can reach your
-printers, and is meant to be reached over a private network (Tailscale,
-WireGuard or your LAN).
+It runs as one Docker Compose stack on any always-on machine that can reach
+your printers (a home server or a NAS), and is meant to
+be reached over a private network: your LAN, Tailscale or WireGuard. It is
+built and tested against a Creality K1C on stock firmware, and works with
+printers that run Klipper with Moonraker.
+
+The app doesn't upload or start prints. You keep slicing and sending from your
+slicer as usual (Creality Print, OrcaSlicer, ...), and the app watches.
+
+## Screenshots
+
+The dashboard, with the 3D model of the print in progress:
+
+![Dashboard](docs/screenshots/dashboard.png)
+
+The printer page: progress, the 3D model (or the live camera), speed, fans,
+temperatures, the light and the latest actions:
+
+![Printer page](docs/screenshots/printer.png)
+
+Files captured from the printer, with a file's details, and the print history:
+
+![Files](docs/screenshots/files.png)
+
+![File details](docs/screenshots/file-detail.png)
+
+![History](docs/screenshots/history.png)
+
+The theme picker, with 100 built-in themes:
+
+![Themes](docs/screenshots/themes.png)
+
+On a phone:
+
+<p>
+  <img src="docs/screenshots/mobile-dashboard.png" alt="Dashboard on a phone" width="300">
+  <img src="docs/screenshots/mobile-printer.png" alt="Printer page on a phone" width="300">
+</p>
+
+## Features
+
+- **Live status** pushed from the printer over one websocket: state, progress,
+  layer, time left, temperatures and fans. No polling.
+- **3D preview** of the toolpath being printed, with the printed part
+  highlighted and a dot at the nozzle.
+- **Live camera** for Creality printers on stock firmware (WebRTC), relayed by
+  the server so every open page shares one stream from the printer.
+- **Controls** (off by default): pause, resume, stop, print speed, fans,
+  nozzle and bed targets, and the chamber light, each a fixed command, with an
+  action log.
+- **File capture**: a copy of every `.gcode`/`.3mf` sent to the printer, with
+  the slicer's thumbnail, time, material and filament, sorted with labels.
+- **History** of every print, how it ended, and the file it came from.
+- **Themes**: 100 base themes, plus your own in a YAML file.
+- **Careful with the printer**: one connection per printer, no port scanning,
+  one reconnect every 30 seconds when it's offline, and read-only unless you
+  turn controls on.
+
+## What you need
+
+- A machine that stays on, can reach the printer on your network, and runs
+  Docker with the Compose plugin. Linux is what it's built for.
+- A printer that runs **Moonraker** (Klipper). That includes Creality's K1,
+  K1C and K2 family, where Moonraker answers on port 7125. `printers.yaml`
+  already accepts OctoPrint, PrusaLink and Bambu entries, but only the
+  Moonraker driver exists so far.
+- Optional: Tailscale (or WireGuard) if you want to open the app away from
+  home.
+
+## Set it up on your network
+
+### 1. Give the printer a fixed address
+
+The app connects to the printer by IP address, so reserve one for it in your
+router's DHCP settings (look for "DHCP reservation" or "static lease"). The
+printer's current address is in its screen's network settings, or in your
+router's list of devices.
+
+You can check Moonraker answers from the machine that will run the app with a
+single request (swap in your printer's address):
 
 ```
-.
-  compose.yaml            printer-api (+ a fake printer under the "fake" profile)
-  .env.example            settings
-  printers.example.yaml   your printers
-  api/                    FastAPI + SQLite server, drivers/, tests/
-  web/                    React + Vite + Tailwind + shadcn/ui app (built into the image)
-  fakes/                  fake Moonraker for tests and local development
+curl http://<printer-ip>:7125/server/info
 ```
+
+### 2. Get the code
+
+```
+git clone https://github.com/safchow/printer-app.git
+cd printer-app
+```
+
+### 3. Settings: `.env`
+
+```
+cp .env.example .env
+```
+
+Open `.env` and set:
+
+- `BIND_ADDRESS`: the address the app listens on. Use the machine's **LAN IP**
+  (for example `192.168.1.20`) to reach it from anything at home, its
+  **Tailscale IP** (`100.x.y.z`, from `tailscale ip -4`) to reach it only over
+  Tailscale, or leave `127.0.0.1` to reach it only from the machine itself.
+  Don't use `0.0.0.0`, and don't forward the port on your router: the app has
+  no login and is meant for a private network only.
+- `PORT`: the web port, 8090 by default.
+- `TZ`: your time zone, for example `Europe/London`, so times in the app are
+  local.
+- `PUID` / `PGID`: the user and group the container runs as, 1000:1000 by
+  default. If your user isn't 1000, add `PUID=` and `PGID=` with the values of
+  `id -u` and `id -g`.
+
+Every other setting has a safe default; the full list is under
+[Settings](#settings-env).
+
+### 4. Your printers: `printers.yaml`
+
+```
+cp printers.example.yaml printers.yaml
+```
+
+Set `host` to the address from step 1 and give the printer an `id` (used in
+URLs) and a `name`. For a K1C on stock firmware the rest of the example is
+already right: `type: moonraker`, `port: 7125`, `camera: creality_webrtc`, and
+`cfs: true` if you have the Creality Filament System. List more printers under
+`printers:` the same way.
+
+The fan and light names under `moonraker:` are the K1C's. For other printers,
+see [Finding your printer's object names](#finding-your-printers-object-names).
+
+### 5. Folder ownership
+
+The app writes its database to `./data` and captured print files to
+`./library`. Both come with the repository, so they belong to the user who
+cloned it. Make sure that user matches `PUID:PGID`:
+
+```
+ls -ld data library          # should show your user
+sudo chown -R "$(id -u):$(id -g)" data library   # only if they don't
+```
+
+If you point `DATA_DIR` or `LIBRARY_ROOT` somewhere else, create those folders
+first and give them to the same user. If Docker creates a missing folder
+itself, it belongs to root: the app can't write there, and it starts with file
+capture turned off.
+
+### 6. Check, then start
+
+Check the config without touching any printer:
+
+```
+docker compose run --rm printer-api python -m app.doctor
+```
+
+Then build and start the stack (the app and the camera relay):
+
+```
+docker compose up -d --build
+```
+
+Open `http://<BIND_ADDRESS>:<PORT>`, for example `http://192.168.1.20:8090`.
+On a phone you can add it to the home screen.
+
+### 7. Optional: turn things on or off
+
+All in `.env`, followed by `docker compose up -d`:
+
+- `CONTROLS_ENABLED=true` turns on the printer controls. They're **off by
+  default**: until then the app only listens to the printer, and every control
+  answers "turned off". See [Controls](#controls) for exactly what each button
+  sends.
+- `CAPTURE_FILES=false` stops keeping copies of files sent to the printer.
+- `GCODE_PREVIEW=false` stops the once-per-print download for the 3D preview.
+- `GO2RTC_URL=` (empty) turns the camera relay off; see
+  [Direct mode](#direct-mode-relay-off).
+
+Your own colour themes go in `./data/themes.yaml`; see [Themes](#themes) and
+`themes.example.yaml`. They show up on the next page load, with no restart.
+
+### Use it away from home with Tailscale
+
+1. Install Tailscale on the machine running the app and on your phone or
+   laptop, signed in to the same tailnet.
+2. Set `BIND_ADDRESS` in `.env` to the machine's Tailscale IP
+   (`tailscale ip -4`) and run `docker compose up -d`.
+3. Open `http://<tailscale-ip>:8090` from any of your devices.
+
+The printer itself doesn't need to be on Tailscale: the app talks to it over
+your LAN, and with the camera relay (the default) the video comes through the
+app too.
+
+Docker can only listen on a Tailscale IP once Tailscale is up. If the stack
+starts before Tailscale after a reboot, run `docker compose up -d` again.
+
+### Updating
+
+```
+git pull
+docker compose up -d --build
+```
+
+Database changes are migrated automatically at startup.
+
+### Finding your printer's object names
+
+Fan and light names differ between printers. The defaults in
+`printers.example.yaml` are a stock-firmware K1C's. To see your printer's,
+run this **once, while the printer is idle**:
+
+```
+docker compose run --rm printer-api python -m app.doctor --probe
+```
+
+It makes three read-only GET requests per printer (`/server/info`,
+`/printer/info`, `/printer/objects/list`), one at a time with a pause between
+them and no retries, and prints the fans, pins, lights and heaters it finds.
+Put the ones you want under `moonraker:` in `printers.yaml`.
+
+### A note on Creality printers
+
+Creality's printers are less robust on the network than a PC. Don't port-scan
+them or point monitoring tools at them while they print: a K1C can restart
+mid-print under that kind of load. This app was written with that in mind. It
+holds one websocket per printer, only talks to the host and port in
+`printers.yaml`, makes at most one camera handshake per printer every 5
+seconds, and downloads a file only once (when it arrives, or when its print
+starts).
+
+## How it works
+
+The rest of this file goes into detail on each part.
 
 ## How it talks to printers
 
@@ -77,7 +296,7 @@ address:
 ## Controls
 
 With `CONTROLS_ENABLED=true` in `.env`, the printer page's buttons work:
-Pause, Resume and Stop (Pause and Stop ask first), a print speed slider (50 to
+Pause, Resume and Stop (Pause and Stop ask first), a print speed slider (20 to
 160%), fan sliders, nozzle and bed targets, and the chamber light. Each button
 sends exactly one fixed command. On Moonraker printers:
 
@@ -178,38 +397,6 @@ colours...) are worked out from those unless you set them. The full list of
 colours is at the top of `base.yaml`. A theme with a bad colour or text that
 would be hard to read is left out and the reason is logged; it never stops
 the app.
-
-## Setup
-
-1. `cp .env.example .env` and set `BIND_ADDRESS` to a private address the app
-   should listen on (a Tailscale IP, a WireGuard IP or a LAN IP). The default,
-   `127.0.0.1`, only listens on the machine itself.
-2. `cp printers.example.yaml printers.yaml` and fill in your printers.
-3. Optional: check the config without touching any printer:
-   `docker compose run --rm printer-api python -m app.doctor`
-4. `docker compose up -d --build`
-5. Open `http://<BIND_ADDRESS>:<PORT>` (8090 by default).
-
-The container runs as `PUID:PGID` (1000:1000 by default) and writes its
-database to `DATA_DIR` (`./data`).
-
-If `BIND_ADDRESS` is a Tailscale IP, Docker can only publish on it once
-Tailscale is up. If the stack starts before Tailscale after a reboot, run
-`docker compose up -d` again.
-
-### Finding your printer's object names
-
-Fan and light names differ between printers. The defaults in
-`printers.example.yaml` are a stock-firmware K1C's. To see your printer's,
-run this **once, while the printer is idle**:
-
-```
-docker compose run --rm printer-api python -m app.doctor --probe
-```
-
-It makes three read-only GET requests per printer (`/server/info`,
-`/printer/info`, `/printer/objects/list`), one at a time with a pause between
-them and no retries, and prints the fans, pins, lights and heaters it finds.
 
 ## Try it without a printer
 
