@@ -1,6 +1,7 @@
 """File capture: files the printer announces are downloaded once, stored by content, sorted and kept."""
 
 import base64
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -36,6 +37,7 @@ def sliced(name: str, extra: str = "") -> bytes:
 @pytest.fixture
 def client(tmp_path, printers_file, monkeypatch):
     monkeypatch.setattr(library_mod, "QUIET_SECONDS", 0.4)
+    monkeypatch.setattr(library_mod, "FALLBACK_SECONDS", 1.0)
     s = Settings(data_dir=tmp_path / "data", printers_file=printers_file, reconnect_seconds=0.3,
                  static_dir=tmp_path / "none", library_root=tmp_path / "library")
     with TestClient(create_app(s)) as c:
@@ -153,3 +155,35 @@ def test_unusable_library_folder_turns_capture_off(tmp_path, printers_file, fake
         wait_for_sync(lambda: c.get("/api/printers/k1c").json()["state"] == "printing")
         assert c.get("/api/config").json()["capture_files"] is False
         assert c.get("/api/files").status_code == 404
+
+
+def test_silence_mid_upload_waits_for_the_finished_notice(client, fake_server):
+    # What the K1C did on 2026-11-17: create_file, thumbnails, then 20+ s of nothing while
+    # still writing, then modify_file. Nothing may be fetched before modify_file.
+    big = sliced("Q") + b"G1 X1 Y1 E1\n" * 30000
+    fake_server.run(fake_server.fake.upload("quant_1.gcode", big, gap=0.05, silence=0.8))  # longer than QUIET, shorter than FALLBACK
+    wait_for_sync(lambda: any(f["filename"] == "quant_1.gcode" for f in files(client)))
+    f = next(f for f in files(client) if f["filename"] == "quant_1.gcode")
+    assert f["size"] == len(big) and fetched(fake_server, "quant_1.gcode") == 1
+    assert client.get(f"/api/files/{f['id']}/raw").content == big
+
+
+def test_finished_file_announced_once_is_kept_after_the_fallback(client, fake_server):
+    # A plain Moonraker upload: one create_file with the full size, no modify_file.
+    body = sliced("M")
+    fake_server.fake.files["plain.gcode"] = body
+    fake_server.run(fake_server.fake.notify("notify_filelist_changed", [
+        {"action": "create_file", "item": {"root": "gcodes", "path": "plain.gcode", "size": len(body)}}]))
+    wait_for_sync(lambda: any(f["filename"] == "plain.gcode" for f in files(client)), timeout=5)
+    assert fetched(fake_server, "plain.gcode") == 1
+
+
+def test_a_copy_of_the_wrong_size_is_not_kept(client, fake_server):
+    # create_file says ~100 KB, modify_file never comes, and the printer still has half a file.
+    body = sliced("P") + b"G1 X1 Y1 E1\n" * 30000
+    fake_server.fake.files["partial.gcode"] = body[: len(body) // 2]
+    fake_server.run(fake_server.fake.notify("notify_filelist_changed", [
+        {"action": "create_file", "item": {"root": "gcodes", "path": "partial.gcode", "size": 102300}}]))
+    wait_for_sync(lambda: fetched(fake_server, "partial.gcode") == 1, timeout=5)
+    time.sleep(0.5)
+    assert not any(f["filename"] == "partial.gcode" for f in files(client))
