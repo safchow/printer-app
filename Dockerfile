@@ -14,7 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY api/ ./
 COPY fakes/ /fakes/
 COPY --from=web /web/dist ./static
-RUN mkdir -p /data /library /config && chmod 777 /data /library
+RUN mkdir -p /data /library /timelapse /config && chmod 777 /data /library /timelapse
 # Inside the container it listens on every interface; compose publishes the
 # port only on BIND_ADDRESS from .env.
 ENV BIND_ADDRESS=0.0.0.0 PORT=8090 DATA_DIR=/data LIBRARY_ROOT=/library PRINTERS_FILE=/config/printers.yaml

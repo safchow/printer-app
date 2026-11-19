@@ -22,6 +22,11 @@ services:
       GCODE_PREVIEW: ${GCODE_PREVIEW:-true}
       # Keep each file sent to the printer (Files and History pages).
       CAPTURE_FILES: ${CAPTURE_FILES:-true}
+      # A camera frame per layer of every print (docs/timelapse.md). TIMELAPSE_DIR
+      # must hold a .timelapse-root file before anything is saved there.
+      TIMELAPSE: ${TIMELAPSE:-true}
+      TIMELAPSE_ROOT: /timelapse
+      TIMELAPSE_MIN_FREE_GB: ${TIMELAPSE_MIN_FREE_GB:-20}
       # Camera relay. Set GO2RTC_URL= (empty) in .env to go back to browsers
       # connecting to the printer's camera directly.
       GO2RTC_URL: ${GO2RTC_URL-http://go2rtc:1984}
@@ -30,6 +35,7 @@ services:
       - ${PRINTERS_FILE:-./printers.yaml}:/config/printers.yaml:ro
       - ${DATA_DIR:-./data}:/data
       - ${LIBRARY_ROOT:-./library}:/library
+      - ${TIMELAPSE_DIR:-./timelapse}:/timelapse
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${PORT:-8090}:8090"
     depends_on:

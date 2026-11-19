@@ -72,6 +72,25 @@ export interface PrintJob {
   ended_at: string | null;
   result: "printing" | "complete" | "cancelled" | "error" | "unknown";
   print_duration: number | null;
+  /** Time-lapse frames saved for this print; 0 = none. */
+  timelapse_frames?: number;
+  timelapse_bytes?: number;
+}
+
+export interface TimelapseFrame {
+  n: number;
+  layer: number | null;
+  t: string | null;
+}
+
+export interface Timelapse {
+  frames: TimelapseFrame[];
+  /** Layer ranges [from, to] with no frame. */
+  gaps: [number, number][];
+  total_layers: number | null;
+  recording: boolean;
+  /** False when frames were recorded but can't be read right now (the NAS is away). */
+  available: boolean;
 }
 
 export interface StoredFile {

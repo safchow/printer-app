@@ -43,11 +43,39 @@ def test_fix_answer_adds_missing_h264_and_flips_direction():
     fixed = fix_answer(ANSWER, fix_offer(OFFER))
     lines = fixed.split("\r\n")
     m = next(l for l in lines if l.startswith("m=video"))
-    assert m.endswith(" 0 96 98")  # the answer's own first; VP8 not added
+    assert m.endswith(" 0 98 96")  # right after the first format (go2rtc drops it); VP8 not added
     assert "a=rtpmap:98 H264/90000" in lines
     assert "a=fmtp:98 profile-level-id=42e01f;packetization-mode=1" in lines
     assert "a=rtcp-fb:98 nack" in lines
     assert "a=sendonly" in lines and "a=sendrecv" not in lines
+
+
+# The K1C's real answer (2026-11-19, trimmed): "96 0", profile 42e01f. The offer from go2rtc
+# had 96 (42001f), 97 (42e01f), 98 (640032) and 100 (H265).
+REAL_OFFER = (
+    "v=0\r\no=- 1 1 IN IP4 0.0.0.0\r\ns=-\r\nt=0 0\r\n"
+    "m=video 9 UDP/TLS/RTP/SAVPF 96 97 98 100\r\nc=IN IP4 0.0.0.0\r\na=mid:0\r\na=sendrecv\r\n"
+    "a=rtpmap:96 H264/90000\r\na=fmtp:96 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f\r\n"
+    "a=rtpmap:97 H264/90000\r\na=fmtp:97 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f\r\n"
+    "a=rtpmap:98 H264/90000\r\na=fmtp:98 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=640032\r\n"
+    "a=rtpmap:100 H265/90000\r\n"
+)
+REAL_ANSWER = (
+    "v=0\r\no=- 2 2 IN IP4 0.0.0.0\r\ns=-\r\nt=0 0\r\n"
+    "m=video 9 UDP/TLS/RTP/SAVPF 96 0\r\n"
+    "a=fmtp:96 profile-level-id=42e01f;level-asymmetry-allowed=1\r\n"
+    "a=fmtp:0 profile-level-id=42e01f;packetization-mode=1;level-asymmetry-allowed=1\r\n"
+    "a=rtpmap:96 H264/90000\r\na=rtpmap:0 H264/90000\r\nc=IN IP4 0.0.0.0\r\na=sendonly\r\na=mid:0\r\n"
+)
+
+
+def test_fix_answer_puts_the_matching_profile_where_go2rtc_binds():
+    lines = fix_answer(REAL_ANSWER, REAL_OFFER).split("\r\n")
+    m = next(l for l in lines if l.startswith("m=video"))
+    # go2rtc drops "96" and binds viewers to the next: 97, the offered type with the K1C's profile.
+    assert m == "m=video 9 UDP/TLS/RTP/SAVPF 96 97 98 0"
+    assert "a=fmtp:97 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f" in lines
+    assert not any(l.startswith("a=rtpmap:100") for l in lines)
 
 
 def test_fix_answer_leaves_complete_answer_alone():

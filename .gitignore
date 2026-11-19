@@ -7,3 +7,5 @@ library/*
 api/static/
 **/__pycache__/
 .pytest_cache/
+timelapse/*
+!timelapse/.gitkeep

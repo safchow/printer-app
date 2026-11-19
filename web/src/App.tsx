@@ -6,6 +6,7 @@ import { PrintersProvider } from "@/hooks/usePrinters";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { Dashboard } from "@/pages/Dashboard";
 import { FilesPage } from "@/pages/FilesPage";
+import { HistoryEntryPage } from "@/pages/HistoryEntryPage";
 import { HistoryPage } from "@/pages/HistoryPage";
 import { PrinterPage } from "@/pages/PrinterPage";
 import { queryClient } from "@/lib/queryClient";
@@ -23,6 +24,7 @@ export default function App() {
                 <Route path="/printers/:id" element={<PrinterPage />} />
                 <Route path="/files" element={<FilesPage />} />
                 <Route path="/history" element={<HistoryPage />} />
+                <Route path="/history/:id" element={<HistoryEntryPage />} />
                 <Route path="*" element={<Dashboard />} />
               </Routes>
             </BrowserRouter>
