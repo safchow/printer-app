@@ -32,7 +32,11 @@ import time
 from pathlib import Path
 from urllib.parse import quote
 
+import httpx
+import websockets
+
 from .camera import CameraError, SessionDescription
+from .fmp4 import StreamFixer
 
 log = logging.getLogger(__name__)
 
@@ -187,6 +191,9 @@ class Go2rtc:
 async def pump(client, upstream, linger: float | None = None) -> None:
     """Copy messages both ways between a viewer (Starlette WebSocket) and go2rtc (websockets).
 
+    What go2rtc sends is fixed on the way (app/fmp4.py): real-time timestamps
+    and the right codec label, which iPhone Safari needs.
+
     When the viewer goes, the upstream stays open for `linger` seconds (its
     messages are dropped) so go2rtc keeps the printer stream running for the
     next page.
@@ -195,12 +202,16 @@ async def pump(client, upstream, linger: float | None = None) -> None:
 
     linger = LINGER if linger is None else linger
 
+    fixer = StreamFixer()
+
     async def down() -> None:
         async for message in upstream:
-            if isinstance(message, bytes):
-                await client.send_bytes(message)
-            else:
-                await client.send_text(message)
+            out = fixer.binary(message) if isinstance(message, bytes) else fixer.text(message)
+            for m in out:
+                if isinstance(m, bytes):
+                    await client.send_bytes(m)
+                else:
+                    await client.send_text(m)
 
     async def up() -> None:
         while True:
@@ -243,3 +254,84 @@ async def _linger(upstream, seconds: float) -> None:
         await asyncio.wait_for(drain(), timeout=seconds)
     with contextlib.suppress(Exception):
         await upstream.close()
+
+
+# --- stills, for browsers that can't play the live video -----------------------
+
+STILL_MAX_AGE = 1.5  # seconds a still is shared between pages before a new one is asked for
+STILL_TIMEOUT = 10.0
+FIRST_STILL_TIMEOUT = 20.0  # the first one waits for the camera handshake
+MIN_JPEG_BYTES = 1000
+STILL_CODECS = "avc1.640029,avc1.64002A,avc1.640033,hvc1.1.6.L153.B0"
+
+
+class Stills:
+    """JPEG stills from go2rtc (/api/frame.jpeg), a fallback for pages that can't play video.
+
+    go2rtc only knows a printer's stream while something watches it, so this
+    holds one viewer connection of its own, like an open camera page, and lets
+    it go LINGER seconds after the last still was asked for. Stills are shared
+    for STILL_MAX_AGE seconds, so several phones cost one request.
+    """
+
+    def __init__(self, go2rtc: Go2rtc, client: httpx.AsyncClient | None = None):
+        self.go2rtc = go2rtc
+        self.client = client or httpx.AsyncClient()
+        self.cache: dict[str, tuple[float, bytes]] = {}
+        self.locks: dict[str, asyncio.Lock] = {}
+        self.viewers: dict[str, asyncio.Task] = {}
+        self.wanted: dict[str, float] = {}
+
+    async def get(self, printer_id: str) -> bytes | None:
+        self.wanted[printer_id] = time.monotonic()
+        lock = self.locks.setdefault(printer_id, asyncio.Lock())
+        async with lock:
+            hit = self.cache.get(printer_id)
+            if hit and time.monotonic() - hit[0] < STILL_MAX_AGE:
+                return hit[1]
+            fresh = printer_id not in self.viewers or self.viewers[printer_id].done()
+            if fresh:
+                self.viewers[printer_id] = asyncio.create_task(self._viewer(printer_id), name=f"stills:{printer_id}")
+                await asyncio.sleep(0.2)  # let go2rtc create the stream before asking it for a frame
+            data = await self._frame(printer_id, FIRST_STILL_TIMEOUT if fresh else STILL_TIMEOUT)
+            if data:
+                self.cache[printer_id] = (time.monotonic(), data)
+            return data
+
+    async def _frame(self, printer_id: str, timeout: float) -> bytes | None:
+        try:
+            r = await self.client.get(f"{self.go2rtc.url}/api/frame.jpeg", params={"src": printer_id}, timeout=timeout)
+        except (httpx.HTTPError, OSError) as exc:
+            log.debug("still for %s: %r", printer_id, exc)
+            return None
+        data = r.content
+        if r.status_code != 200 or len(data) < MIN_JPEG_BYTES or not data.startswith(b"\xff\xd8"):
+            return None
+        return data
+
+    async def _viewer(self, printer_id: str) -> None:
+        try:
+            async with websockets.connect(self.go2rtc.ws_url(printer_id), max_size=None, open_timeout=5) as ws:
+                await ws.send(json.dumps({"type": "mse", "value": STILL_CODECS}))
+                drain = asyncio.create_task(self._drain(ws))
+                try:
+                    while time.monotonic() - self.wanted.get(printer_id, 0) < LINGER and not drain.done():
+                        await asyncio.sleep(1)
+                finally:
+                    drain.cancel()
+        except (OSError, websockets.WebSocketException, TimeoutError) as exc:
+            log.warning("stills: camera relay unreachable (%r)", exc)
+
+    @staticmethod
+    async def _drain(ws) -> None:
+        with contextlib.suppress(Exception):
+            async for _ in ws:
+                pass
+
+    async def stop(self) -> None:
+        for task in self.viewers.values():
+            task.cancel()
+        for task in self.viewers.values():
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+        await self.client.aclose()

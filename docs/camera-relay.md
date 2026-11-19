@@ -66,6 +66,34 @@ These fixes are in `api/app/relay.py`, with tests in `api/tests/test_relay.py`.
 - go2rtc's own Creality fix drops the answer's first format, which on the K1C
   is a placeholder.
 
+### Fixes to the video on its way to the page
+
+go2rtc's fragmented MP4 from the K1C has two faults that iPhone Safari won't
+accept (desktop Chrome plays it anyway). printer-api fixes both as it passes
+the stream on (`api/app/fmp4.py`, tests in `api/tests/test_fmp4.py`):
+
+- **The clock runs about 10x fast.** Frames arrive about 14 times a second,
+  but their timestamps say 0.7 s each, so the buffer races ahead of the
+  playhead. Each fragment's start time and duration are rewritten from when
+  fragments actually arrive (the mean gap over the last 30), laid end to end
+  from zero.
+- **The codec label is wrong.** go2rtc tells the page `avc1.640029` (High
+  4.1); the K1C sends Main 3.0. The label is taken from the init segment's
+  avcC box instead.
+
+Only box fields are rewritten, so sizes don't change. Anything that doesn't
+look as expected is passed on untouched.
+
+### When live video still won't play
+
+The page retries a failed stream twice by itself. After that it shows a still
+every 2 seconds from `GET /api/printers/{id}/camera/still.jpg`, with a button
+to try live video again. The server asks go2rtc for the still
+(`/api/frame.jpeg`), holding one viewer connection of its own while stills are
+wanted (let go 20 s after the last one), and shares each still between pages
+for 1.5 s. The error text now names the browser's error (for example
+`QuotaExceededError` or a media error code).
+
 The last handshake for each printer (the offer, the fixed offer, the answer
 and the fixed answer) is saved to `data/camera-handshake-<id>.txt`. Read it
 first when the camera shows nothing.
