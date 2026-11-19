@@ -68,20 +68,27 @@ These fixes are in `api/app/relay.py`, with tests in `api/tests/test_relay.py`.
 
 ### Fixes to the video on its way to the page
 
-go2rtc's fragmented MP4 from the K1C has two faults that iPhone Safari won't
-accept (desktop Chrome plays it anyway). printer-api fixes both as it passes
+go2rtc's fragmented MP4 from the K1C has faults that iPhone Safari won't
+accept (desktop Chrome plays it anyway). printer-api fixes them as it passes
 the stream on (`api/app/fmp4.py`, tests in `api/tests/test_fmp4.py`):
+
+- **The init segment is a placeholder.** go2rtc writes avcC before it has
+  seen any video: Baseline 1.0, 128x96. The real SPS/PPS (Main 3.0, 800x600)
+  come in-band on keyframes. The init segment is held until the first
+  fragment with an SPS and PPS, then rebuilt from them (avcC, and the width
+  and height in avc1 and tkhd). If none comes within 60 fragments, it goes
+  out as it was.
 
 - **The clock runs about 10x fast.** Frames arrive about 14 times a second,
   but their timestamps say 0.7 s each, so the buffer races ahead of the
   playhead. Each fragment's start time and duration are rewritten from when
   fragments actually arrive (the mean gap over the last 30), laid end to end
   from zero.
-- **The codec label is wrong.** go2rtc tells the page `avc1.640029` (High
-  4.1); the K1C sends Main 3.0. The label is taken from the init segment's
-  avcC box instead.
+- **The codec label is wrong.** go2rtc tells the page `avc1.640029` or
+  `avc1.42000A`; the K1C sends Main 3.0. The label is taken from the rebuilt
+  avcC instead.
 
-Only box fields are rewritten, so sizes don't change. Anything that doesn't
+Fragments are only rewritten in place. Anything that doesn't
 look as expected is passed on untouched.
 
 ### When live video still won't play

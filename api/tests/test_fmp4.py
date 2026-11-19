@@ -1,9 +1,15 @@
 import json
 import struct
 
-from app.fmp4 import StreamFixer, avc_codec, boxes, find, video_track
+from app.fmp4 import MAX_HOLD, StreamFixer, avc_codec, boxes, find, parse_sps, rebuild_init, video_track
 
 TIMESCALE = 90000
+# A real H.264 Main 3.0, 800x600 SPS and its PPS (from x264), and go2rtc-style
+# placeholder ones (Baseline 1.0, 128x96).
+SPS = bytes.fromhex("674d401ed900c8137e5c044000000301400000030383c58b92")
+PPS = bytes.fromhex("68ebc3cb20")
+PLACEHOLDER_SPS = bytes.fromhex("6742c00ad9020db011000003000100000300140f122648")
+PLACEHOLDER_PPS = bytes.fromhex("68cb83cb20")
 
 
 def box(kind: bytes, payload: bytes) -> bytes:
@@ -14,8 +20,13 @@ def full(kind: bytes, version: int, flags: int, payload: bytes) -> bytes:
     return box(kind, bytes([version]) + flags.to_bytes(3, "big") + payload)
 
 
-def init_segment(profile=(0x4D, 0x40, 0x1E), handler=b"vide", tracks=1) -> bytes:
-    avcc = box(b"avcC", bytes([1, *profile, 0xFF, 0xE1]))
+def nals(*units: bytes) -> bytes:
+    return b"".join(struct.pack(">I", len(u)) + u for u in units)
+
+
+def init_segment(sps=PLACEHOLDER_SPS, pps=PLACEHOLDER_PPS, handler=b"vide", tracks=1) -> bytes:
+    avcc = box(b"avcC", bytes([1, *sps[1:4], 0xFF, 0xE1]) + struct.pack(">H", len(sps)) + sps
+               + b"\x01" + struct.pack(">H", len(pps)) + pps)
     avc1 = box(b"avc1", bytes(78) + avcc)
     stsd = full(b"stsd", 0, 0, struct.pack(">I", 1) + avc1)
     stbl = box(b"stbl", stsd)
@@ -27,14 +38,16 @@ def init_segment(profile=(0x4D, 0x40, 0x1E), handler=b"vide", tracks=1) -> bytes
     return box(b"ftyp", b"iso5\x00\x00\x02\x00iso5iso6mp41") + box(b"moov", trak * tracks)
 
 
-def fragment(seq: int, tfdt: int, duration: int = 64300, cto: int = 0) -> bytes:
+def fragment(seq: int, tfdt: int, duration: int = 64300, cto: int = 0, keyframe: bool | None = None) -> bytes:
     """Like go2rtc's: one sample, every per-sample field in trun, tfdt version 1."""
     mfhd = full(b"mfhd", 0, 0, struct.pack(">I", seq))
     tfhd = full(b"tfhd", 0, 0x20000, struct.pack(">I", 1))
     tfdt_box = full(b"tfdt", 1, 0, struct.pack(">Q", tfdt))
     trun = full(b"trun", 0, 0xF01, struct.pack(">Ii", 1, 0) + struct.pack(">IIII", duration, 4, 0, cto))
     moof = box(b"moof", mfhd + box(b"traf", tfhd + tfdt_box + trun))
-    return moof + box(b"mdat", b"\x00\x00\x00\x01")
+    keyframe = seq == 1 if keyframe is None else keyframe
+    frame = nals(SPS, PPS, b"\x65\x88\x84") if keyframe else nals(b"\x41\x9a\x02")
+    return moof + box(b"mdat", frame)
 
 
 def times(data: bytes) -> tuple[int, int, int]:
@@ -53,25 +66,49 @@ def run(fixer: StreamFixer, clock: list[float], gaps: list[float], start: int = 
     for i, gap in enumerate(gaps):
         clock[0] += gap
         out += fixer.binary(fragment(i + 1, start + i * 64300))
-    return out
+    return [m for m in out if isinstance(m, bytes) and m[4:8] == b"moof"]
 
 
-def test_reads_the_real_codec_and_track():
-    init = init_segment()
+def test_reads_the_codec_track_and_sps():
+    init = init_segment(SPS, PPS)
     assert avc_codec(init) == "avc1.4D401E"
+    assert avc_codec(init_segment()) == "avc1.42C00A"
+    assert parse_sps(SPS)["width"] == 800 and parse_sps(SPS)["height"] == 600
+    assert parse_sps(PLACEHOLDER_SPS)["width"] == 128
     assert video_track(init) == (1, TIMESCALE)
     assert video_track(init_segment(handler=b"soun")) is None
     assert video_track(init_segment(tracks=2)) is None
     assert [b[0] for b in boxes(init)] == [b"ftyp", b"moov"]
 
 
-def test_answer_waits_for_the_init_segment_and_gets_the_right_codec():
+def test_init_is_rebuilt_from_the_first_keyframe():
     fixer = StreamFixer(clock=lambda: 0.0)
     assert fixer.text(ANSWER) == []
-    init = init_segment()
-    answer, segment = fixer.binary(init)
+    assert fixer.binary(init_segment()) == []  # held for the real SPS/PPS
+    answer, init, first = fixer.binary(fragment(1, 0))
     assert json.loads(answer)["value"] == 'video/mp4; codecs="avc1.4D401E"'
-    assert segment == init
+    assert init == rebuild_init(init_segment(), SPS, PPS)
+    stsd = next(find(init, [b"moov", b"trak", b"mdia", b"minf", b"stbl", b"stsd"]))
+    (_k, _s, ep, ee), = list(boxes(init, stsd[0] + 8, stsd[1]))
+    assert struct.unpack_from(">HH", init, ep + 24) == (800, 600)
+    tkhd = next(find(init, [b"moov", b"trak", b"tkhd"]))
+    assert struct.unpack_from(">II", init, tkhd[1] - 8) == (800 << 16, 600 << 16)
+    assert video_track(init) == (1, TIMESCALE)
+    assert times(first)[0] == 0
+    assert fixer.binary(fragment(2, 64300)) != []  # then fragments flow straight through
+
+
+def test_init_goes_out_unchanged_if_no_sps_comes():
+    fixer = StreamFixer(clock=lambda: 0.0)
+    fixer.text(ANSWER)
+    init = init_segment()
+    fixer.binary(init)
+    out = []
+    for i in range(MAX_HOLD):
+        out += fixer.binary(fragment(i + 2, i, keyframe=False))
+    assert out[0] == json.dumps({"type": "mse", "value": 'video/mp4; codecs="avc1.42C00A"'})
+    assert out[1] == init
+    assert len(out) == 2 + MAX_HOLD
 
 
 def test_other_messages_pass_straight_through():
@@ -102,7 +139,7 @@ def test_composition_offsets_scale_with_the_duration():
     fixer.text(ANSWER)
     fixer.binary(init_segment())
     clock[0] += 0.1
-    (out,) = fixer.binary(fragment(1, 0, duration=64300, cto=128600))
+    *_, out = fixer.binary(fragment(1, 0, duration=64300, cto=128600))
     _, dur, cto = times(out)
     assert cto == 2 * dur
 
