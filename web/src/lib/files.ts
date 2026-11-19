@@ -1,28 +1,49 @@
 import * as React from "react";
+import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { FileMeta, LabelCount, PrintJob, StoredFile } from "./types";
 
-/** GET some JSON; `reload()` asks again. `data` stays while a reload runs. */
-export function useJson<T>(url: string | null) {
-  const [data, setData] = React.useState<T | null>(null);
-  const [error, setError] = React.useState<string | null>(null);
-  const [tick, setTick] = React.useState(0);
-  React.useEffect(() => {
-    if (!url) return;
-    let stop = false;
-    fetch(url)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`the server answered ${r.status}`))))
-      .then((d: T) => {
-        if (stop) return;
-        setData(d);
-        setError(null);
-      })
-      .catch((e: Error) => !stop && setError(e.message));
-    return () => {
-      stop = true;
-    };
-  }, [url, tick]);
-  const reload = React.useCallback(() => setTick((t) => t + 1), []);
-  return { data, error, reload };
+/** GET some JSON. */
+export async function getJson<T>(url: string): Promise<T> {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`the server answered ${r.status}`);
+  return r.json();
+}
+
+/**
+ * GET some JSON through the shared query cache (keyed by URL). Pages that
+ * remount (Files <-> History) get the cached copy at once and refresh it in
+ * the background when it's older than `staleTime`. `reload()` asks again.
+ * `data` stays while a reload runs.
+ */
+export function useJson<T>(url: string | null, opts?: { staleTime?: number }) {
+  const q = useQuery({
+    queryKey: [url],
+    queryFn: () => getJson<T>(url!),
+    enabled: url != null,
+    // Only override when asked: an explicit `undefined` would replace the app-wide default.
+    ...(opts?.staleTime !== undefined && { staleTime: opts.staleTime }),
+  });
+  const { refetch } = q;
+  const reload = React.useCallback(() => void refetch(), [refetch]);
+  return { data: q.data ?? null, error: q.error ? q.error.message : null, reload };
+}
+
+/** URLs whose answers change when a file is added, relabelled, deleted or printed. */
+const LIBRARY_PREFIXES = ["/api/files", "/api/labels", "/api/history"];
+
+export function invalidateLibrary(qc: QueryClient, prefixes: string[] = LIBRARY_PREFIXES) {
+  return qc.invalidateQueries({
+    predicate: (query) => {
+      const key = query.queryKey[0];
+      return typeof key === "string" && prefixes.some((p) => key.startsWith(p));
+    },
+  });
+}
+
+/** Mark everything file-related stale; whatever is on screen refetches now, the rest on next visit. */
+export function useInvalidateLibrary() {
+  const qc = useQueryClient();
+  return React.useCallback(() => void invalidateLibrary(qc), [qc]);
 }
 
 export type FileFilter = { kind: "inbox" } | { kind: "all" } | { kind: "label"; name: string };
