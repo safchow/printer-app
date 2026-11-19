@@ -73,6 +73,9 @@ class PrintJob(SQLModel, table=True):
     ended_at: datetime | None = None
     result: str = "printing"  # printing | complete | cancelled | error | unknown
     print_duration: float | None = None
+    # Time-lapse frames saved for this print (app/timelapse.py); 0 = no time-lapse.
+    timelapse_frames: int = 0
+    timelapse_bytes: int = 0
 
 
 def make_engine(database_url: str):

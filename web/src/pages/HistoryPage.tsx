@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Link } from "react-router-dom";
-import { Box } from "lucide-react";
+import { Box, ChevronRight } from "lucide-react";
 import { AppHeader } from "@/components/AppHeader";
 import { usePrinters } from "@/hooks/usePrinters";
 import { RESULT_LABEL, useHistory } from "@/lib/files";
@@ -56,7 +56,7 @@ export function HistoryPage() {
       <main className="mx-auto flex w-full max-w-[960px] flex-col gap-6 p-4 md:p-6">
         <div>
           <h1 className="m-0 text-xl font-semibold">History</h1>
-          <p className="m-0 mt-0.5 text-sm text-muted-foreground">Every print the app has seen start, newest first.</p>
+          <p className="m-0 mt-0.5 text-sm text-muted-foreground">Every print the app has seen start, newest first. Open one to see its model and time-lapse.</p>
         </div>
 
         {data && data.length > 0 && (
@@ -91,32 +91,27 @@ export function HistoryPage() {
               <ul className="m-0 flex list-none flex-col divide-y rounded-xl border p-0">
                 {jobs.map((j) => {
                   const t = elapsed(j);
-                  const file = (
-                    <span className="block truncate text-sm font-medium" title={j.filename}>
-                      {j.filename}
-                    </span>
-                  );
+                  const to = j.result === "printing" ? `/printers/${j.printer_id}` : `/history/${j.id}`;
                   return (
-                    <li key={j.id} className="flex items-center gap-3.5 px-4 py-3">
-                      <SmallThumb job={j} />
-                      <div className="min-w-0 flex-1">
-                        {j.file_id != null ? (
-                          <Link to={`/files?file=${j.file_id}`} className="text-foreground no-underline hover:underline">
-                            {file}
-                          </Link>
-                        ) : (
-                          file
-                        )}
-                        <span className="block text-[13px] text-muted-foreground">
-                          {name(j.printer_id)} · {clock(j.started_at)}
-                          {j.ended_at ? `–${clock(j.ended_at)}` : ""}
-                          {t ? ` · ${duration(t)}` : ""}
-                          {j.file_id == null ? " · no copy kept" : ""}
+                    <li key={j.id}>
+                      <Link to={to} className="flex items-center gap-3.5 px-4 py-3 text-foreground no-underline hover:bg-muted/50">
+                        <SmallThumb job={j} />
+                        <div className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium" title={j.filename}>
+                            {j.filename}
+                          </span>
+                          <span className="block text-[13px] text-muted-foreground">
+                            {name(j.printer_id)} · {clock(j.started_at)}
+                            {j.ended_at ? `–${clock(j.ended_at)}` : ""}
+                            {t ? ` · ${duration(t)}` : ""}
+                            {j.file_id == null ? " · no copy kept" : ""}
+                          </span>
+                        </div>
+                        <span className={cn("inline-flex shrink-0 items-center rounded-full px-2.5 py-0.5 text-xs font-medium", RESULT_STYLE[j.result])}>
+                          {RESULT_LABEL[j.result]}
                         </span>
-                      </div>
-                      <span className={cn("inline-flex shrink-0 items-center rounded-full px-2.5 py-0.5 text-xs font-medium", RESULT_STYLE[j.result])}>
-                        {RESULT_LABEL[j.result]}
-                      </span>
+                        <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                      </Link>
                     </li>
                   );
                 })}

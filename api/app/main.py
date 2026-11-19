@@ -26,6 +26,7 @@ from .gcode import GcodeCache
 from .library import Library
 from .themes import ThemeStore
 from .hub import Hub
+from .timelapse import Timelapse
 from .relay import Go2rtc, decode_go2rtc_offer, encode_answer, fix_answer, fix_offer, pump
 
 log = logging.getLogger(__name__)
@@ -85,12 +86,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.camera = CameraRelay(min_interval=settings.camera_min_interval)
         app.state.go2rtc = (Go2rtc(settings.go2rtc_url, settings.camera_callback_url, settings.data_dir)
                             if settings.go2rtc_url else None)
+        app.state.timelapse = None
+        if settings.timelapse and library:
+            tl = Timelapse(engine, settings.timelapse_root, app.state.go2rtc, configs, library,
+                           min_free_bytes=int(settings.timelapse_min_free_gb * 1024**3))
+            app.state.timelapse = tl
+            problem = tl.storage_problem()
+            if problem:
+                log.warning("time-lapses won't be saved until this is fixed: %s", problem)
+            if not app.state.go2rtc:
+                log.warning("time-lapses need the camera relay (GO2RTC_URL)")
+            for driver in hub.drivers.values():
+                driver.on_status(tl.on_status)  # after the library's, which opens the print's history row
         hub.start()
         try:
             yield
         finally:
             await hub.stop()
             await app.state.gcode.stop()
+            if app.state.timelapse:
+                await app.state.timelapse.stop()
             if app.state.library:
                 await app.state.library.stop()
             engine.dispose()
@@ -205,6 +220,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/history")
     def history(limit: int = 200) -> list[dict]:
         return library_of().history(limit=max(1, min(limit, 1000)))
+
+    def job_of(job_id: int) -> dict:
+        job = library_of().job(job_id)
+        if not job:
+            raise HTTPException(404, "no such print")
+        return job
+
+    @app.get("/api/history/{job_id}")
+    def history_entry(job_id: int) -> dict:
+        return job_of(job_id)
+
+    @app.get("/api/history/{job_id}/timelapse")
+    def timelapse_frames(job_id: int) -> dict:
+        job = job_of(job_id)
+        tl = app.state.timelapse
+        if tl is None:
+            return {"frames": [], "gaps": [], "total_layers": None, "recording": False,
+                    "available": not job.get("timelapse_frames")}
+        return tl.frames(job)
+
+    @app.get("/api/history/{job_id}/timelapse/{n}.jpg")
+    def timelapse_frame(job_id: int, n: int) -> FileResponse:
+        job = job_of(job_id)
+        tl = app.state.timelapse
+        path = tl.frame_path(job, n) if tl else None
+        if path is None:
+            raise HTTPException(404, "no such frame")
+        # A saved frame never changes.
+        return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=31536000, immutable"})
 
     # --- controls (app/controls.py has the rules) ---
 

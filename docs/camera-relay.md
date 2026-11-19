@@ -54,11 +54,15 @@ These fixes are in `api/app/relay.py`, with tests in `api/tests/test_relay.py`.
   the printer.
 - **The answer's direction.** The answer is flipped from `sendrecv` to
   `sendonly`, so go2rtc's receive-only connection accepts it.
-- **A payload type missing from the answer.** The K1C has been seen sending
-  H.264 on a payload type that was in the offer but left out of its answer
+- **A payload type missing from the answer.** The K1C sends H.264 on a
+  payload type that was in the offer but left out of its answer
   ([go2rtc #2024](https://github.com/AlexxIT/go2rtc/issues/2024)). Any offered
-  H.264 payload type the answer leaves out is added back, after the answer's
-  own.
+  H.264 payload type the answer leaves out is added back, **straight after the
+  answer's first format**, the ones with the K1C's announced profile first.
+  go2rtc drops that first format and binds viewers to the next one, so this
+  puts viewers on the type the video arrives on. (Added at the end, as before,
+  viewers sat on an empty receiver: browsers got only the init segment and
+  still-frame requests hung.)
 - go2rtc's own Creality fix drops the answer's first format, which on the K1C
   is a placeholder.
 

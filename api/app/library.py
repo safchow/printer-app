@@ -443,7 +443,22 @@ class Library:
     def job_dict(j: PrintJob) -> dict:
         return {"id": j.id, "printer_id": j.printer_id, "filename": j.filename, "file_id": j.file_id,
                 "started_at": _utc(j.started_at), "ended_at": _utc(j.ended_at), "result": j.result,
-                "print_duration": j.print_duration}
+                "print_duration": j.print_duration, "timelapse_frames": j.timelapse_frames,
+                "timelapse_bytes": j.timelapse_bytes}
+
+    def open_job_id(self, printer_id: str) -> int | None:
+        """The id of the print this printer is running, as far as history knows."""
+        jid = self._jobs.get(printer_id)
+        if jid is not None:
+            return jid
+        with Session(self.engine) as s:
+            job = self._open_job(s, printer_id)
+            return job.id if job else None
+
+    def job(self, job_id: int) -> dict | None:
+        with Session(self.engine) as s:
+            j = s.get(PrintJob, job_id)
+            return self.job_dict(j) if j else None
 
     def history(self, limit: int = 200) -> list[dict]:
         with Session(self.engine) as s:

@@ -1,6 +1,6 @@
 import * as React from "react";
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { FileMeta, LabelCount, PrintJob, StoredFile } from "./types";
+import type { FileMeta, LabelCount, PrintJob, StoredFile, Timelapse } from "./types";
 
 /** GET some JSON. */
 export async function getJson<T>(url: string): Promise<T> {
@@ -58,6 +58,9 @@ export const useFiles = (f: FileFilter) => useJson<StoredFile[]>(filesUrl(f));
 export const useLabels = () => useJson<LabelCount[]>("/api/labels");
 export const useFile = (id: number | null) => useJson<StoredFile>(id == null ? null : `/api/files/${id}`);
 export const useHistory = () => useJson<PrintJob[]>("/api/history?limit=500");
+export const useHistoryEntry = (id: number | null) => useJson<PrintJob>(id == null ? null : `/api/history/${id}`);
+export const useTimelapse = (id: number | null) => useJson<Timelapse>(id == null ? null : `/api/history/${id}/timelapse`);
+export const frameUrl = (jobId: number, n: number) => `/api/history/${jobId}/timelapse/${n}.jpg`;
 
 export async function setLabel(id: number, label: string | null): Promise<StoredFile> {
   const r = await fetch(`/api/files/${id}`, {

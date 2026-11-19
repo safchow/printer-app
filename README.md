@@ -60,6 +60,8 @@ On a phone:
 - **File capture**: a copy of every `.gcode`/`.3mf` sent to the printer, with
   the slicer's thumbnail, time, material and filament, sorted with labels.
 - **History** of every print, how it ended, and the file it came from.
+- **Time-lapses**: a camera frame per layer of every print, saved on your
+  storage and played back from the print's History entry.
 - **Themes**: 100 base themes, plus your own in a YAML file.
 - **Careful with the printer**: one connection per printer, no port scanning,
   one reconnect every 30 seconds when it's offline, and read-only unless you
@@ -359,6 +361,15 @@ Hidden folders such as `.thumbs/` are never fetched, and only `.gcode` and
 Set `CAPTURE_FILES=false` to turn this off (the 3D preview then works as
 before).
 
+## Time-lapses
+
+While a print runs, printer-api keeps one camera connection open through the
+relay and saves a frame on every layer change (about 15 KB each on the K1C).
+Open the print in History and press **Time-lapse** to play it over the model
+view. Frames go to `TIMELAPSE_DIR`, which must hold a `.timelapse-root` file
+first, so an unmounted NAS never fills the system disk. See
+[docs/timelapse.md](docs/timelapse.md).
+
 ## Themes
 
 The appearance button in the top bar opens a theme picker: **System** (follows
@@ -448,6 +459,9 @@ changing a table in `api/app/db.py`, add a migration with
 | `CONTROLS_ENABLED` | Turns on the printer controls | `false` |
 | `GCODE_PREVIEW` | Fetch the current print's G-code once per print for the 3D preview | `true` |
 | `CAPTURE_FILES` | Keep a copy of each file sent to the printer, and the print history | `true` |
+| `TIMELAPSE_DIR` | Where time-lapse frames go (needs a `.timelapse-root` file) | `./timelapse` |
+| `TIMELAPSE` | Record a time-lapse of every print (needs the camera relay) | `true` |
+| `TIMELAPSE_MIN_FREE_GB` | Stop saving frames below this much free space | `20` |
 | `CAMERA_MIN_INTERVAL` | Seconds between camera handshakes per printer | `5` |
 | `GO2RTC_URL` | Camera relay address; empty turns the relay off (direct mode) | `http://go2rtc:1984` |
 | `PUID` / `PGID` | User the container runs as | `1000` |

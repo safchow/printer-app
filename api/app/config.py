@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     capture_files: bool = True
     # Fetch the current print's G-code once per print for the 3D preview (app/gcode.py).
     gcode_preview: bool = True
+    # Time-lapses (app/timelapse.py): a camera frame per layer of every print, saved under
+    # TIMELAPSE_ROOT, which must hold a .timelapse-root file. Needs the camera relay.
+    timelapse: bool = True
+    timelapse_root: Path = Path("./timelapse")
+    timelapse_min_free_gb: float = 20.0
     # Camera relay (docs/camera-relay.md). Empty = browsers connect to the
     # printer's camera directly, which needs a route to the printer.
     go2rtc_url: str = ""

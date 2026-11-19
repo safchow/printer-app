@@ -25,6 +25,7 @@ import asyncio
 import base64
 import contextlib
 import json
+import re
 import logging
 import secrets
 import time
@@ -85,14 +86,32 @@ def fix_offer(sdp: str) -> str:
     return _join(sections)
 
 
+def _profile(section: list[str], pt: str) -> str | None:
+    for line in section:
+        if line.startswith(f"a=fmtp:{pt} "):
+            m = re.search(r"profile-level-id=([0-9a-fA-F]{6})", line)
+            if m:
+                return m.group(1).lower()
+    return None
+
+
 def fix_answer(answer: str, offer: str) -> str:
     """Make the K1C's answer acceptable to a receive-only client.
 
     * Our side only receives, so a sendrecv answer becomes sendonly.
-    * The K1C has been seen sending RTP with an H.264 payload type that was in
-      the offer but missing from its answer (go2rtc issue #2024). Any offered
-      H.264 payload type the answer leaves out is added back, after the
-      answer's own, so the client knows how to read those packets.
+    * The K1C sends RTP with an H.264 payload type that was in the offer but
+      is missing from its answer (go2rtc issue #2024): seen live, its answer
+      lists "96 0" while the video arrives on another offered type. Any offered
+      H.264 payload type the answer leaves out is added back, so the client can
+      read those packets.
+    * Where they go matters: go2rtc's Creality fix drops the answer's first
+      format (a placeholder) and binds viewers to the next one. With the added
+      types after the answer's own, viewers sat on a type that never carries
+      video while the real video went to a second receiver nobody read (seen
+      2026-11-19: the browser got only the init segment and frame requests
+      hung). So the added types go straight after the first format, those
+      whose H.264 profile matches the answer's own first: the K1C streams the
+      profile it announces.
     """
     a_sections = _sections(answer)
     o_video = next((s for s in _sections(offer)[1:] if s[0].startswith("m=video")), None)
@@ -109,7 +128,9 @@ def fix_answer(answer: str, offer: str) -> str:
                    if pt not in have and _rtpmap(o_video, pt).upper().startswith("H264/")]
         if not missing:
             continue
-        s[0] = " ".join(m + missing)
+        announced = {p for p in (_profile(s, pt) for pt in m[3:]) if p}
+        missing.sort(key=lambda pt: 0 if _profile(o_video, pt) in announced else 1)  # stable
+        s[0] = " ".join(m[:4] + missing + m[4:])
         s.extend(line for pt in missing for line in offered.get(pt, []))
     return _join(a_sections)
 
