@@ -70,7 +70,7 @@ function save(key: string, value: unknown) {
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const { data: list } = useJson<ThemeList>("/api/themes");
+  const { data: list } = useJson<ThemeList>("/api/themes", { staleTime: Infinity });
   const [choice, setChoice] = React.useState(loadChoice);
   const [systemDark, setSystemDark] = React.useState(() => matchMedia("(prefers-color-scheme: dark)").matches);
 

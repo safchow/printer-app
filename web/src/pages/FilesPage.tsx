@@ -17,6 +17,7 @@ import {
   RESULT_LABEL,
   setLabel,
   useFile,
+  useInvalidateLibrary,
   useFiles,
   useLabels,
 } from "@/lib/files";
@@ -204,7 +205,7 @@ function Fact({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 function FilePanel({ id, labels, onClose, onChanged }: { id: number; labels: LabelCount[]; onClose: () => void; onChanged: () => void }) {
-  const { data: f, error, reload } = useFile(id);
+  const { data: f, error } = useFile(id);
   const { printers } = usePrinters();
   const [confirm, setConfirm] = React.useState(false);
   const [problem, setProblem] = React.useState<string | null>(null);
@@ -214,8 +215,7 @@ function FilePanel({ id, labels, onClose, onChanged }: { id: number; labels: Lab
     try {
       await setLabel(id, label);
       setProblem(null);
-      reload();
-      onChanged();
+      onChanged(); // refetches this file's details too
     } catch (e) {
       setProblem(`Couldn't change the label: ${(e as Error).message}`);
     }
@@ -360,11 +360,8 @@ export function FilesPage() {
     else next.set("file", String(id));
     setParams(next);
   };
-  const changed = () => {
-    files.reload();
-    labels.reload();
-    all.reload();
-  };
+  // Also marks History stale, so a deleted or relabelled file shows up right there too.
+  const changed = useInvalidateLibrary();
 
   const q = query.trim().toLowerCase();
   const shown = (files.data ?? []).filter((f) => !q || f.filename.toLowerCase().includes(q) || (f.label ?? "").toLowerCase().includes(q));
