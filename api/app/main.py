@@ -10,7 +10,7 @@ from pathlib import Path
 
 import websockets
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import __doc__ as about
@@ -27,7 +27,7 @@ from .library import Library
 from .themes import ThemeStore
 from .hub import Hub
 from .timelapse import Timelapse
-from .relay import Go2rtc, decode_go2rtc_offer, encode_answer, fix_answer, fix_offer, pump
+from .relay import Go2rtc, decode_go2rtc_offer, encode_answer, fix_answer, fix_offer, pump, Stills
 
 log = logging.getLogger(__name__)
 VERSION = "0.1.0"
@@ -86,6 +86,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.camera = CameraRelay(min_interval=settings.camera_min_interval)
         app.state.go2rtc = (Go2rtc(settings.go2rtc_url, settings.camera_callback_url, settings.data_dir)
                             if settings.go2rtc_url else None)
+        app.state.stills = Stills(app.state.go2rtc) if app.state.go2rtc else None
         app.state.timelapse = None
         if settings.timelapse and library:
             tl = Timelapse(engine, settings.timelapse_root, app.state.go2rtc, configs, library,
@@ -104,6 +105,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             await hub.stop()
             await app.state.gcode.stop()
+            if app.state.stills:
+                await app.state.stills.stop()
             if app.state.timelapse:
                 await app.state.timelapse.stop()
             if app.state.library:
@@ -338,6 +341,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         fixed = SessionDescription(type="answer", sdp=fix_answer(answer.sdp, sent.sdp))
         g.save_handshake(printer_id, offer.sdp, sent.sdp, answer.sdp, fixed.sdp)
         return PlainTextResponse(encode_answer(fixed))
+
+    @app.get("/api/printers/{printer_id}/camera/still.jpg")
+    async def camera_still(printer_id: str) -> Response:
+        """One still from the camera relay, for pages that can't play the live video."""
+        stills: Stills | None = app.state.stills
+        driver = hub_of().get(printer_id)
+        if stills is None:
+            raise HTTPException(404, "the camera relay is not set up on this server")
+        if not driver:
+            raise HTTPException(404, "no such printer")
+        if driver.config.camera != "creality_webrtc":
+            raise HTTPException(404, "this printer has no supported camera")
+        if driver.status.state in ("offline", "connecting"):
+            raise HTTPException(409, "printer is offline")
+        data = await stills.get(printer_id)
+        if data is None:
+            raise HTTPException(504, "no picture came from the camera")
+        return Response(data, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
     @app.websocket("/api/printers/{printer_id}/camera/ws")
     async def camera_ws(socket: WebSocket, printer_id: str) -> None:

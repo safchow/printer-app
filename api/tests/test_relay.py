@@ -143,6 +143,7 @@ class FakeGo2rtc:
     def __init__(self):
         self.port = free_port()
         self.paths: list[str] = []
+        self.frames: list[str] = []
         self.closed = threading.Event()
         self.loop = asyncio.new_event_loop()
         self.ready = threading.Event()
@@ -161,9 +162,21 @@ class FakeGo2rtc:
         finally:
             self.closed.set()
 
+    JPEG = b"\xff\xd8" + bytes(2000)
+
+    def process_request(self, connection, request):
+        # go2rtc serves stills on the same port as its WebSocket.
+        if request.path.startswith("/api/frame.jpeg"):
+            from websockets.datastructures import Headers
+            from websockets.http11 import Response
+
+            self.frames.append(request.path)
+            return Response(200, "OK", Headers({"Content-Type": "image/jpeg", "Content-Length": str(len(self.JPEG))}), self.JPEG)
+        return None
+
     def _run(self):
         async def main():
-            async with websockets.serve(self.handler, "127.0.0.1", self.port):
+            async with websockets.serve(self.handler, "127.0.0.1", self.port, process_request=self.process_request):
                 self.ready.set()
                 await asyncio.Future()
         self.loop.run_until_complete(main())
@@ -211,3 +224,18 @@ def test_upstream_lingers_after_viewer_leaves(tmp_path, printers_file, fake_serv
         time.sleep(0.3)
         assert not fake.closed.is_set()  # go2rtc still has a viewer, so the stream keeps running
         assert fake.closed.wait(3)  # and it is let go after the linger
+
+
+def test_stills_hold_a_viewer_and_are_shared(tmp_path, printers_file, fake_server):
+    fake = FakeGo2rtc()
+    app = make_app(tmp_path, printers_file, go2rtc_url=f"http://127.0.0.1:{fake.port}")
+    with TestClient(app) as c:
+        wait_for_sync(lambda: c.get("/api/printers/k1c").json()["state"] == "printing")
+        r = c.get("/api/printers/k1c/camera/still.jpg")
+        assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
+        assert r.content == FakeGo2rtc.JPEG
+        assert r.headers["cache-control"] == "no-store"
+        assert c.get("/api/printers/k1c/camera/still.jpg").status_code == 200
+        assert len(fake.frames) == 1  # the second page got the same still
+        assert fake.paths and fake.paths[0].startswith("/api/ws?name=k1c")  # go2rtc has a viewer
+        assert c.get("/api/printers/nope/camera/still.jpg").status_code == 404
