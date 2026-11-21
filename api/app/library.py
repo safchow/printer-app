@@ -64,7 +64,8 @@ def upload_path(filename: str) -> str:
     stem, dot, suffix = filename.rpartition(".")
     if not dot or f".{suffix.lower()}" not in SUFFIXES:
         stem, suffix = filename, "gcode"
-    stem = re.sub(r"[^A-Za-z0-9 ._()+,-]", "_", stem).strip(" .")[:120] or "print"
+    # Spaces become _ as in Creality Print's uploads.
+    stem = re.sub(r"[^A-Za-z0-9._()+,-]", "_", stem).strip(" .")[:120] or "print"
     return f"{UPLOAD_PREFIX}{stem}.{suffix.lower()}"
 
 

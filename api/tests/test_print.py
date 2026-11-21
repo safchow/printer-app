@@ -61,9 +61,10 @@ def test_print_uploads_our_copy_then_starts_it(client, fake_server):
 
     r = print_file(client, f["id"])
     assert r.status_code == 200, r.text
-    path = "printer-app_rail A.gcode"
+    path = "printer-app_rail_A.gcode"
     assert r.json()["command"] == f"upload {path}; printer.print.start {path}"
     assert fake_server.fake.uploads == [path] and fake_server.fake.files[path] == body
+    assert f"/upload/{path}" in fake_server.fake.http_requests  # Creality's own upload server, like Creality Print
     assert fake_server.fake.started == [path]
     wait_for_sync(lambda: status(client)["state"] == "printing" and status(client)["filename"] == path)
     assert status(client)["progress"] < 0.01
@@ -121,7 +122,7 @@ def test_a_file_that_never_came_from_the_printer_can_be_printed(client, fake_ser
     row = lib.ingest(src, "Bracket v2 ✓.gcode", "claude", None)
     idle(client, fake_server)
     assert print_file(client, row.id).status_code == 200
-    assert fake_server.fake.started == ["printer-app_Bracket v2 _.gcode"]
+    assert fake_server.fake.started == ["printer-app_Bracket_v2__.gcode"]
 
 
 def test_refusals(client, fake_server):
@@ -142,7 +143,7 @@ def test_controls_off(tmp_path, printers_file, fake_server):
 
 
 def test_upload_names_and_paths():
-    assert upload_path("rail A (v2).gcode") == "printer-app_rail A (v2).gcode"
+    assert upload_path("rail A (v2).gcode") == "printer-app_rail_A_(v2).gcode"
     nasty = upload_path('../../a"b\nM112.GCODE')
     assert nasty.startswith("printer-app_") and nasty.endswith("M112.gcode") and "/" not in nasty
     assert print_path_ok(nasty) and '"' not in nasty and "\n" not in nasty
@@ -157,3 +158,18 @@ def test_upload_names_and_paths():
     assert gcode_allowed('SDCARD_PRINT_FILE FILENAME="sub/a b.gcode"')
     assert not gcode_allowed('SDCARD_PRINT_FILE FILENAME="a.gcode" X="y"')
     assert not gcode_allowed('SDCARD_PRINT_FILE FILENAME="a.gcode"\nM112')
+
+
+def test_moonraker_upload_for_other_printers(tmp_path, printers_file, fake_server, monkeypatch):
+    monkeypatch.setattr(controls, "MIN_GAP", 0.0)
+    printers_file.write_text(printers_file.read_text() + "    upload: moonraker\n")
+    fake_server.scenario("idle")
+    with make_client(tmp_path, printers_file) as c:
+        wait_for_sync(lambda: c.get("/api/printers/k1c").json()["state"] == "idle")
+        lib = c.app.state.library
+        src = lib.root / "m.gcode"
+        src.write_bytes(sliced("m"))
+        row = lib.ingest(src, "m.gcode", "claude", None)
+        assert c.post("/api/printers/k1c/print", json={"file_id": row.id}).status_code == 200
+    assert "/server/files/upload" in fake_server.fake.http_requests
+    assert fake_server.fake.uploads == ["printer-app_m.gcode"] == fake_server.fake.started

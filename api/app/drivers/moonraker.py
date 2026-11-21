@@ -20,6 +20,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 import websockets
@@ -86,9 +87,10 @@ STATE_MAP = {
 
 
 def _error_text(r: httpx.Response) -> str:
-    """Moonraker's reason for a refused request: {"error": {"message": ...}} or plain text."""
+    """The printer's reason for a refused request: {"error": {"message": ...}}, {"message": ...} or text."""
     try:
-        err = r.json().get("error")
+        body = r.json()
+        err = body.get("error") or body.get("message")
         text = err.get("message") if isinstance(err, dict) else err
     except Exception:
         text = r.text
@@ -343,23 +345,39 @@ class MoonrakerDriver(PrinterDriver):
         return method
 
     async def upload_file(self, local: Path, path: str) -> str:
-        """One HTTP upload of a file into the G-code folder (POST /server/files/upload). Never retried."""
+        """One HTTP upload of a file into the G-code folder. Never retried.
+
+        Creality printers: their own upload server, POST :upload_port/upload/<encoded name> with one
+        multipart "file" part (what Creality Print sends). Others: Moonraker's /server/files/upload."""
         self._require_enabled()
         if not print_path_ok(path):
             raise ControlError(422, "that file name can't be sent to the printer")
         folder, _, name = path.rpartition("/")
-        url = f"http://{self.config.host}:{self.config.port}/server/files/upload"
+        creality = self.config.upload_kind == "creality"
+        if creality:
+            url = f"http://{self.config.host}:{self.config.upload_port}/upload/{quote(path, safe='')}"
+            data: dict[str, str] = {}
+        else:
+            url = f"http://{self.config.host}:{self.config.port}/server/files/upload"
+            data = {"root": "gcodes", **({"path": folder} if folder else {})}
         try:
             async with httpx.AsyncClient(timeout=UPLOAD_TIMEOUT) as client:
                 with local.open("rb") as fh:
-                    data = {"root": "gcodes", **({"path": folder} if folder else {})}
                     r = await client.post(url, data=data, files={"file": (name, fh, "application/octet-stream")})
         except httpx.HTTPError as exc:
             raise ControlError(502, f"couldn't upload the file to the printer ({type(exc).__name__})") from exc
-        if r.status_code not in (200, 201):
+        body_code = None
+        if creality and r.status_code == 200:
+            try:
+                body_code = r.json().get("code")
+            except Exception:
+                body_code = None
+        if r.status_code not in (200, 201) or body_code not in (None, 200):
             reason = _error_text(r)
             log.warning("%s: upload of %s refused: HTTP %s %s", self.config.id, path, r.status_code, r.text[:1000])
-            raise ControlError(502, f"the printer refused the upload (HTTP {r.status_code}{': ' + reason if reason else ''})")
+            status = r.status_code if body_code is None else body_code
+            raise ControlError(502, f"the printer refused the upload (HTTP {status}{': ' + reason if reason else ''})")
+        log.info("%s: uploaded %s (%s)", self.config.id, path, r.text[:200])
         return f"upload {path}"
 
     async def start_print(self, path: str) -> str:

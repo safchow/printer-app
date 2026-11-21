@@ -6,6 +6,9 @@
 # host/port: the printer's address. Moonraker's port is usually 7125.
 # camera:    creality_webrtc, mjpeg or none (live camera comes in a later version)
 # cfs:       true if the printer has a Creality Filament System
+# upload:    how Print sends a file: auto (default), creality or moonraker. Creality
+#            printers (cfs or a Creality camera) use their own upload server on
+#            upload_port (80), like Creality Print; others use Moonraker.
 #
 # The app keeps one connection per printer and, when a printer is offline,
 # tries again every 30 seconds. It never scans ports.
