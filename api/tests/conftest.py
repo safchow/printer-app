@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import socket
 import sys
 import threading
@@ -15,6 +16,10 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "api"))
 
 from fakes.fake_moonraker import FakeMoonraker  # noqa: E402
+
+# TestClient addresses the app as http://testserver; the request guard (app/guard.py)
+# only answers IP addresses, localhost and ALLOWED_HOSTS.
+os.environ.setdefault("ALLOWED_HOSTS", "testserver")
 
 
 def free_port() -> int:

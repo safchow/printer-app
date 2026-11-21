@@ -23,6 +23,7 @@ from .drivers import PrinterStatus
 from .controls import Controls
 from .drivers.base import ControlError, ControlsDisabled
 from .gcode import GcodeCache
+from .guard import RequestGuard, parse_hosts
 from .library import Library
 from .themes import ThemeStore
 from .hub import Hub
@@ -117,6 +118,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             engine.dispose()
 
     app = FastAPI(title="printer-api", version=VERSION, description=about, lifespan=lifespan)
+    # Only the app's own page may change things (app/guard.py).
+    app.add_middleware(RequestGuard, allowed_hosts=parse_hosts(settings.allowed_hosts))
 
     def hub_of() -> Hub:
         return app.state.hub
