@@ -85,6 +85,16 @@ STATE_MAP = {
 }
 
 
+def _error_text(r: httpx.Response) -> str:
+    """Moonraker's reason for a refused request: {"error": {"message": ...}} or plain text."""
+    try:
+        err = r.json().get("error")
+        text = err.get("message") if isinstance(err, dict) else err
+    except Exception:
+        text = r.text
+    return " ".join(str(text or "").split())[:200]
+
+
 class MethodNotAllowed(RuntimeError):
     pass
 
@@ -342,12 +352,14 @@ class MoonrakerDriver(PrinterDriver):
         try:
             async with httpx.AsyncClient(timeout=UPLOAD_TIMEOUT) as client:
                 with local.open("rb") as fh:
-                    r = await client.post(url, data={"root": "gcodes", "path": folder},
-                                          files={"file": (name, fh, "application/octet-stream")})
+                    data = {"root": "gcodes", **({"path": folder} if folder else {})}
+                    r = await client.post(url, data=data, files={"file": (name, fh, "application/octet-stream")})
         except httpx.HTTPError as exc:
             raise ControlError(502, f"couldn't upload the file to the printer ({type(exc).__name__})") from exc
         if r.status_code not in (200, 201):
-            raise ControlError(502, f"the printer refused the upload (HTTP {r.status_code})")
+            reason = _error_text(r)
+            log.warning("%s: upload of %s refused: HTTP %s %s", self.config.id, path, r.status_code, r.text[:1000])
+            raise ControlError(502, f"the printer refused the upload (HTTP {r.status_code}{': ' + reason if reason else ''})")
         return f"upload {path}"
 
     async def start_print(self, path: str) -> str:

@@ -16,7 +16,7 @@ Rules:
 - new files have no label (the Inbox) until the user gives them one;
 - each print the app watches becomes a print_job row. The app starts a print
   only when asked in the UI (POST /api/printers/{id}/print, app/controls.py):
-  it uploads its own copy to UPLOAD_FOLDER/ on the printer, then starts it, so
+  it uploads its own copy (named UPLOAD_PREFIX...) to the printer, then starts it, so
   anything kept here can be printed again after the printer's storage is cleared.
 """
 
@@ -52,19 +52,20 @@ IDLE_END_SECONDS = 60.0
 # A print seen again with the same file and a start time this close is the same print.
 SAME_PRINT_SECONDS = 300.0
 SUFFIXES = (".gcode", ".3mf")
-# Folder in the printer's G-code folder where the app uploads files it prints; never captured back.
-UPLOAD_FOLDER = "printer-app"
+# Name prefix for files the app uploads to print; never captured back. They go in the top of the
+# G-code folder: the K1C's Moonraker refused an upload into a subfolder (HTTP 500, 2026-11-21).
+UPLOAD_PREFIX = "printer-app_"
 ACTIVE = ("printing", "paused")
 ENDED = ("complete", "cancelled", "error")
 
 
 def upload_path(filename: str) -> str:
-    """Where the app puts a stored file on the printer: its own folder, a plain version of the name."""
+    """Where the app puts a stored file on the printer: a plain version of the name, with UPLOAD_PREFIX."""
     stem, dot, suffix = filename.rpartition(".")
     if not dot or f".{suffix.lower()}" not in SUFFIXES:
         stem, suffix = filename, "gcode"
     stem = re.sub(r"[^A-Za-z0-9 ._()+,-]", "_", stem).strip(" .")[:120] or "print"
-    return f"{UPLOAD_FOLDER}/{stem}.{suffix.lower()}"
+    return f"{UPLOAD_PREFIX}{stem}.{suffix.lower()}"
 
 
 def wanted(item: dict[str, Any]) -> str | None:
@@ -75,7 +76,7 @@ def wanted(item: dict[str, Any]) -> str | None:
     parts = path.split("/")
     if not path or any(p.startswith(".") or p in ("", "..") for p in parts):
         return None  # .thumbs/ and other hidden folders
-    if parts[0] == UPLOAD_FOLDER:
+    if path.startswith(UPLOAD_PREFIX):
         return None  # the app's own uploads: we already have them
     return path if path.lower().endswith(SUFFIXES) else None
 

@@ -61,7 +61,7 @@ def test_print_uploads_our_copy_then_starts_it(client, fake_server):
 
     r = print_file(client, f["id"])
     assert r.status_code == 200, r.text
-    path = "printer-app/rail A.gcode"
+    path = "printer-app_rail A.gcode"
     assert r.json()["command"] == f"upload {path}; printer.print.start {path}"
     assert fake_server.fake.uploads == [path] and fake_server.fake.files[path] == body
     assert fake_server.fake.started == [path]
@@ -89,7 +89,7 @@ def test_prints_the_exact_version_clicked(client, fake_server):
     assert old["id"] != new["id"]
     idle(client, fake_server)
     assert print_file(client, old["id"]).status_code == 200
-    assert fake_server.fake.files["printer-app/part.gcode"] == sliced("v1")
+    assert fake_server.fake.files["printer-app_part.gcode"] == sliced("v1")
     wait_for_sync(lambda: client.get(f"/api/files/{old['id']}").json()["prints"] == 1)
     assert client.get(f"/api/files/{new['id']}").json()["prints"] == 0
 
@@ -99,8 +99,8 @@ def test_falls_back_to_sdcard_print_file(client, fake_server):
     idle(client, fake_server)
     fake_server.fake.print_methods = False
     r = print_file(client, f["id"])
-    assert r.status_code == 200 and r.json()["command"].endswith('SDCARD_PRINT_FILE FILENAME="printer-app/rail_B.gcode"')
-    assert fake_server.fake.scripts == ['SDCARD_PRINT_FILE FILENAME="printer-app/rail_B.gcode"']
+    assert r.status_code == 200 and r.json()["command"].endswith('SDCARD_PRINT_FILE FILENAME="printer-app_rail_B.gcode"')
+    assert fake_server.fake.scripts == ['SDCARD_PRINT_FILE FILENAME="printer-app_rail_B.gcode"']
     wait_for_sync(lambda: status(client)["state"] == "printing")
 
 
@@ -109,7 +109,7 @@ def test_a_failed_upload_starts_nothing(client, fake_server):
     idle(client, fake_server)
     fake_server.fake.upload_fails = True
     r = print_file(client, f["id"])
-    assert r.status_code == 502 and "refused the upload" in r.json()["detail"]
+    assert r.status_code == 502 and r.json()["detail"] == "the printer refused the upload (HTTP 500: No space left on device)"
     assert fake_server.fake.started == [] and status(client)["state"] == "idle"
     assert client.get("/api/printers/k1c/actions").json()[0]["result"] == "failed"
 
@@ -121,7 +121,7 @@ def test_a_file_that_never_came_from_the_printer_can_be_printed(client, fake_ser
     row = lib.ingest(src, "Bracket v2 ✓.gcode", "claude", None)
     idle(client, fake_server)
     assert print_file(client, row.id).status_code == 200
-    assert fake_server.fake.started == ["printer-app/Bracket v2 _.gcode"]
+    assert fake_server.fake.started == ["printer-app_Bracket v2 _.gcode"]
 
 
 def test_refusals(client, fake_server):
@@ -142,12 +142,12 @@ def test_controls_off(tmp_path, printers_file, fake_server):
 
 
 def test_upload_names_and_paths():
-    assert upload_path("rail A (v2).gcode") == "printer-app/rail A (v2).gcode"
+    assert upload_path("rail A (v2).gcode") == "printer-app_rail A (v2).gcode"
     nasty = upload_path('../../a"b\nM112.GCODE')
-    assert nasty.startswith("printer-app/") and nasty.endswith("M112.gcode") and nasty.count("/") == 1
+    assert nasty.startswith("printer-app_") and nasty.endswith("M112.gcode") and "/" not in nasty
     assert print_path_ok(nasty) and '"' not in nasty and "\n" not in nasty
-    assert upload_path(".hidden.3mf") == "printer-app/hidden.3mf"
-    assert upload_path("noext") == "printer-app/noext.gcode"
+    assert upload_path(".hidden.3mf") == "printer-app_hidden.3mf"
+    assert upload_path("noext") == "printer-app_noext.gcode"
     assert all(print_path_ok(upload_path(n)) for n in ("x" * 400 + ".gcode", "Körper.gcode", "...gcode"))
     for ok in ("a.gcode", "sub/Part 1 (v2).gcode", "x.3mf"):
         assert print_path_ok(ok), ok
