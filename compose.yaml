@@ -14,6 +14,8 @@ services:
     user: "${PUID:-1000}:${PGID:-1000}"
     environment:
       TZ: ${TZ:-UTC}
+      # Names (besides IP addresses) you open the app by, e.g. a MagicDNS name.
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
       IMPORT_TOKEN: ${IMPORT_TOKEN:-}
       TAILSCALE_SOCKET: ${TAILSCALE_SOCKET:-}
       CAMERA_MIN_INTERVAL: ${CAMERA_MIN_INTERVAL:-5}

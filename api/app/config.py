@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     # Your own colour themes (app/themes.py). Empty = DATA_DIR/themes.yaml.
     themes_file: Path | None = None
     tz: str = "UTC"
+    # Host names (besides IP addresses and localhost) the app may be opened by,
+    # e.g. a Tailscale MagicDNS name. Comma separated, no ports. See app/guard.py.
+    allowed_hosts: str = ""
     import_token: str = ""
     tailscale_socket: str = ""
     # How long to wait between connection attempts to an offline printer.

@@ -13,8 +13,10 @@ be reached over a private network: your LAN, Tailscale or WireGuard. It is
 built and tested against a Creality K1C on stock firmware, and works with
 printers that run Klipper with Moonraker.
 
-The app doesn't upload or start prints. You keep slicing and sending from your
-slicer as usual (Creality Print, OrcaSlicer, ...), and the app watches.
+You keep slicing and sending from your slicer as usual (Creality Print,
+OrcaSlicer, ...), and the app watches. With controls turned on, you can also
+print any file the app has kept again, straight from its Files page, even after
+it's gone from the printer.
 
 ## Screenshots
 
@@ -57,6 +59,8 @@ On a phone:
 - **Controls** (off by default): pause, resume, stop, print speed, fans,
   nozzle and bed targets, and the chamber light, each a fixed command, with an
   action log.
+- **Print from Files** (needs controls): send the app's copy of a kept file to
+  the printer and start it, after a confirmation.
 - **File capture**: a copy of every `.gcode`/`.3mf` sent to the printer, with
   the slicer's thumbnail, time, material and filament, sorted with labels.
 - **History** of every print, how it ended, and the file it came from.
@@ -115,6 +119,10 @@ Open `.env` and set:
   Tailscale, or leave `127.0.0.1` to reach it only from the machine itself.
   Don't use `0.0.0.0`, and don't forward the port on your router: the app has
   no login and is meant for a private network only.
+- `ALLOWED_HOSTS`: only if you open the app by a **name** rather than its IP
+  address (a Tailscale MagicDNS name, a hosts-file entry...). List the names,
+  comma separated, without the port. See
+  [Other web pages can't use the app](#other-web-pages-cant-use-the-app).
 - `PORT`: the web port, 8090 by default.
 - `TZ`: your time zone, for example `Europe/London`, so times in the app are
   local.
@@ -195,7 +203,9 @@ Your own colour themes go in `./data/themes.yaml`; see [Themes](#themes) and
    laptop, signed in to the same tailnet.
 2. Set `BIND_ADDRESS` in `.env` to the machine's Tailscale IP
    (`tailscale ip -4`) and run `docker compose up -d`.
-3. Open `http://<tailscale-ip>:8090` from any of your devices.
+3. Open `http://<tailscale-ip>:8090` from any of your devices. To use the
+   machine's MagicDNS name instead, add it to `ALLOWED_HOSTS` in `.env`
+   (for example `ALLOWED_HOSTS=myserver,myserver.tail1234.ts.net`).
 
 The printer itself doesn't need to be on Tailscale: the app talks to it over
 your LAN, and with the camera relay (the default) the video comes through the
@@ -235,8 +245,8 @@ them or point monitoring tools at them while they print: a K1C can restart
 mid-print under that kind of load. This app was written with that in mind. It
 holds one websocket per printer, only talks to the host and port in
 `printers.yaml`, makes at most one camera handshake per printer every 5
-seconds, and downloads a file only once (when it arrives, or when its print
-starts).
+seconds, downloads a file only once (when it arrives, or when its print
+starts), and only uploads a file when you press Print.
 
 ## How it works
 
@@ -309,6 +319,7 @@ sends exactly one fixed command. On Moonraker printers:
 | Fans | `SET_FAN_SPEED FAN=<name> SPEED=0..1`, steps of 10% | while online |
 | Nozzle / bed | `M104 S<°C>` / `M140 S<°C>`: 0, or 30 to 300 (nozzle) / 100 (bed) | while online |
 | Light | `SET_PIN PIN=<pin> VALUE=0/1` | while online |
+| Print (Files page) | one upload of the app's copy, then `printer.print.start` (or the `SDCARD_PRINT_FILE` macro) | while idle, complete or cancelled |
 
 The rules are enforced on the server, not just in the page. The driver only
 sends G-code that matches its allowlist exactly, and the API never accepts
@@ -361,6 +372,37 @@ Hidden folders such as `.thumbs/` are never fetched, and only `.gcode` and
 Set `CAPTURE_FILES=false` to turn this off (the 3D preview then works as
 before).
 
+## Printing a kept file
+
+With `CONTROLS_ENABLED=true`, a file's details on the Files page (desktop) have
+a **Print** button. It asks first, showing the print time and material, then
+the server:
+
+1. checks again that the printer is online and not printing or in error;
+2. uploads **the app's own copy** of the file, once, as
+   `printer-app_<name>` at the top of the printer's G-code folder (spaces
+   become `_`). The app always sends its copy, so a file you cleared off the
+   printer can still be printed, and these uploads are never captured back as
+   new files;
+3. starts it with one `printer.print.start` (or `SDCARD_PRINT_FILE`).
+
+Nothing is retried. If the printer refuses, the page shows the printer's own
+reason, and the press goes into the action log either way. The print links to
+the file it came from in History.
+
+How the file is uploaded is set per printer in `printers.yaml` with `upload:`:
+
+- `auto` (the default): `creality` for Creality printers (a CFS or a Creality
+  camera), otherwise `moonraker`.
+- `creality`: the printer's own upload server, `POST
+  http://<host>:<upload_port>/upload/<name>` (port 80 by default), which is what
+  Creality Print uses. A stock K1C's Moonraker refuses uploads with
+  "upload file fail", so this is the one that works there.
+- `moonraker`: Moonraker's `/server/files/upload`, for other Klipper printers.
+
+The uploaded `printer-app_*` files stay on the printer until you delete them
+there.
+
 ## Time-lapses
 
 While a print runs, printer-api keeps one camera connection open through the
@@ -369,6 +411,25 @@ Open the print in History and press **Time-lapse** to play it over the model
 view. Frames go to `TIMELAPSE_DIR`, which must hold a `.timelapse-root` file
 first, so an unmounted NAS never fills the system disk. See
 [docs/timelapse.md](docs/timelapse.md).
+
+## Other web pages can't use the app
+
+The app has no login, so it relies on being on a private network. But a web
+page you have open elsewhere, on a device that can reach the app, could still
+ask your browser to send it requests: to stop a print, delete a file, start a
+print or open the camera. The app refuses those:
+
+- Anything that changes something (POST, PATCH, DELETE) and every WebSocket
+  must come from the app's own page. Browsers say where a request comes from
+  (the `Origin` and `Sec-Fetch-Site` headers); a request from another page gets
+  `403` and changes nothing.
+- The app only answers when it's addressed by an IP address, `localhost`, or a
+  name in `ALLOWED_HOSTS`. That stops a site from pointing its own name at the
+  app's address to look like the app (DNS rebinding).
+
+Scripts and `curl` send neither header and still work. If you put the app
+behind a reverse proxy, the proxy must pass the original `Host` header on. A
+refused request is logged with the reason.
 
 ## Themes
 
@@ -455,6 +516,7 @@ changing a table in `api/app/db.py`, add a migration with
 | `LIBRARY_ROOT` | Captured print files | `./library` |
 | `PRINTERS_FILE` | Which printers file to mount | `./printers.yaml` |
 | `TZ` | Time zone for times in the app | `UTC` |
+| `ALLOWED_HOSTS` | Names (besides IP addresses and `localhost`) the app may be opened by | empty |
 | `THEMES_FILE` | Your own themes file (see Themes) | `DATA_DIR/themes.yaml` |
 | `CONTROLS_ENABLED` | Turns on the printer controls | `false` |
 | `GCODE_PREVIEW` | Fetch the current print's G-code once per print for the 3D preview | `true` |
