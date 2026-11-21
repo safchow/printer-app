@@ -47,6 +47,9 @@ class TempBody(BaseModel):
 class LightBody(BaseModel):
     on: bool
 
+class PrintBody(BaseModel):
+    file_id: int
+
 class FileBody(BaseModel):
     label: str | None = Field(None, max_length=60)
 
@@ -295,6 +298,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/printers/{printer_id}/light")
     async def control_light(printer_id: str, body: LightBody, request: Request) -> dict:
         return await control(printer_id, "light", body.model_dump(), request)
+
+    @app.post("/api/printers/{printer_id}/print")
+    async def control_print(printer_id: str, body: PrintBody, request: Request) -> dict:
+        """Start printing a captured file that's already on this printer (nothing is uploaded)."""
+        if not hub_of().get(printer_id):
+            raise HTTPException(404, "no such printer")
+        if not app.state.controls.enabled:
+            raise HTTPException(501, "controls are turned off on this server (CONTROLS_ENABLED)")
+        try:
+            path = library_of().print_path(body.file_id, printer_id)
+        except ControlError as exc:
+            raise HTTPException(exc.status, exc.detail) from exc
+        return await control(printer_id, "print", {"file_id": body.file_id, "path": path}, request)
 
     @app.get("/api/printers/{printer_id}/actions")
     def printer_actions(printer_id: str, limit: int = 20) -> list[dict]:

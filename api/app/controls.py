@@ -29,6 +29,7 @@ MIN_GAP = 1.0
 SPEEDS = range(20, 161, 10)
 PRINT_STATES = ("printing", "paused")
 OFFLINE = ("offline", "connecting")
+READY_STATES = ("idle", "complete", "cancelled")  # a new print can start from these
 LIMITS = {"nozzle": 300, "bed": 100}
 MIN_HEAT = 30
 
@@ -38,6 +39,11 @@ def check(driver: PrinterDriver, action: str, values: dict[str, Any]) -> None:
     state = driver.status.state
     if state in OFFLINE:
         raise ControlError(409, "the printer is offline")
+    if action == "print":
+        if state in PRINT_STATES:
+            raise ControlError(409, "the printer is already printing")
+        if state not in READY_STATES:
+            raise ControlError(409, "the printer isn't ready (it reports an error); check it before printing")
     if action == "pause" and state != "printing":
         raise ControlError(409, "nothing is printing")
     if action == "resume" and state != "paused":
@@ -98,6 +104,8 @@ class Controls:
     @staticmethod
     async def _send(driver: PrinterDriver, action: str, v: dict[str, Any]) -> str:
         match action:
+            case "print":
+                return await driver.start_print(v["path"])
             case "pause":
                 return await driver.pause()
             case "resume":

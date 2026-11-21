@@ -7,9 +7,9 @@ complete states, and can pretend to go offline.
 
     python fakes/fake_moonraker.py --port 7125 --scenario printing
 
-Controls: printer.print.pause / resume / cancel and printer.gcode.script with
+Controls: printer.print.start / pause / resume / cancel and printer.gcode.script with
 the commands printer-api sends (M220, SET_FAN_SPEED, M104, M140, SET_PIN,
-PAUSE, RESUME, CANCEL_PRINT) change the simulated printer; every script is
+PAUSE, RESUME, CANCEL_PRINT, SDCARD_PRINT_FILE) change the simulated printer; every script is
 recorded in `scripts`. With print_methods=False the printer.print.* methods
 are missing, as on some vendor Moonraker builds.
 
@@ -25,6 +25,7 @@ import asyncio
 import contextlib
 import copy
 import json
+import re
 import time
 from typing import Any
 
@@ -103,6 +104,7 @@ class FakeMoonraker:
         self.reports_layers = True
         self.gcode_size = len(fake_gcode().encode())
         self.scripts: list[str] = []
+        self.started: list[str] = []  # files printer.print.start was asked to print
         self.tick_seconds = tick_seconds
         self.filename = filename
         self.start_progress = start_progress
@@ -246,11 +248,30 @@ class FakeMoonraker:
             if not self.print_methods:
                 raise LookupError(method)
             return self._script(actions[method])
+        if method == "printer.print.start":
+            if not self.print_methods:
+                raise LookupError(method)
+            self.started.append(str(params.get("filename", "")))
+            return self.start(str(params.get("filename", "")))
         if method == "printer.gcode.script":
             script = str(params.get("script", ""))
             self.scripts.append(script)
             return self._script(script)
         raise LookupError(method)
+
+    def start(self, filename: str) -> dict[str, dict[str, Any]]:
+        """Start a print from the G-code folder, as Klipper's SDCARD_PRINT_FILE would."""
+        before = copy.deepcopy(self.objects)
+        if self.objects["print_stats"]["state"] in ("printing", "paused"):
+            raise ValueError("SD busy")
+        if filename not in self.files and filename != self.filename:
+            raise ValueError(f"Unable to open file \"{filename}\"")
+        self.filename = filename
+        self.objects["print_stats"]["state"] = "standby"  # so set_scenario resets progress
+        self.start_progress, saved = 0.0, self.start_progress
+        self.set_scenario("printing")
+        self.start_progress = saved
+        return diff(before, self.objects)
 
     def _script(self, script: str) -> dict[str, dict[str, Any]]:
         before = copy.deepcopy(self.objects)
@@ -271,6 +292,11 @@ class FakeMoonraker:
             if state not in ("printing", "paused"):
                 raise ValueError("Print is not active")
             self.set_scenario("cancelled")
+        elif cmd == "SDCARD_PRINT_FILE":
+            m = re.fullmatch(r'SDCARD_PRINT_FILE FILENAME="([^"]+)"', script)
+            if not m:
+                raise ValueError("Malformed command 'SDCARD_PRINT_FILE'")
+            return self.start(m.group(1))
         elif cmd == "M220":
             o["gcode_move"]["speed_factor"] = int(args["S"]) / 100
         elif cmd == "M104":

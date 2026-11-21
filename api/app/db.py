@@ -56,6 +56,8 @@ class StoredFile(SQLModel, table=True):
     label_id: int | None = Field(default=None, foreign_key="label.id", index=True)
     source: str = "printer"  # printer | print (the once-per-print backstop) | claude
     printer_id: str | None = None
+    # Path inside the printer's G-code folder it was last seen at (None for older rows and app uploads).
+    printer_path: str | None = None
     meta: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
     first_seen: datetime
     last_seen: datetime

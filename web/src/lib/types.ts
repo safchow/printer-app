@@ -100,6 +100,8 @@ export interface StoredFile {
   size: number;
   source: "printer" | "print" | "claude";
   printer_id: string | null;
+  /** Where the file sits in that printer's G-code folder; Print starts this path. */
+  printer_path: string | null;
   label: string | null;
   meta: FileMeta;
   thumbnail: boolean;

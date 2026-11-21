@@ -1,6 +1,6 @@
 import * as React from "react";
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { FileMeta, LabelCount, PrintJob, StoredFile, Timelapse } from "./types";
+import type { FileMeta, LabelCount, Printer, PrintJob, StoredFile, Timelapse } from "./types";
 
 /** GET some JSON. */
 export async function getJson<T>(url: string): Promise<T> {
@@ -75,6 +75,37 @@ export async function setLabel(id: number, label: string | null): Promise<Stored
 export async function deleteFile(id: number): Promise<void> {
   const r = await fetch(`/api/files/${id}`, { method: "DELETE" });
   if (!r.ok) throw new Error(`the server answered ${r.status}`);
+}
+
+/** Ask the server to start printing a stored file on the printer it came from. Throws with the server's reason. */
+export async function printFile(printerId: string, fileId: number): Promise<void> {
+  const r = await fetch(`/api/printers/${encodeURIComponent(printerId)}/print`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ file_id: fileId }),
+  });
+  if (!r.ok) {
+    const data = await r.json().catch(() => ({}));
+    throw new Error(typeof data.detail === "string" ? data.detail : `the server answered ${r.status}`);
+  }
+}
+
+/** Why Print can't be pressed for this file right now, or null when it can. The server checks again. */
+export function printBlocker(f: StoredFile, printer: Printer | undefined, controlsEnabled: boolean): string | null {
+  if (!controlsEnabled) return "Printing from the app needs controls turned on (CONTROLS_ENABLED).";
+  if (!f.printer_id || f.source === "claude") return "This file was never sent to a printer, so there's nothing to print.";
+  if (!printer) return "The printer this file came from isn't set up any more.";
+  switch (printer.state) {
+    case "printing":
+    case "paused":
+      return `${printer.name} is busy with another print.`;
+    case "offline":
+    case "connecting":
+      return `${printer.name} is offline.`;
+    case "error":
+      return `${printer.name} reports an error. Check it before printing.`;
+  }
+  return null;
 }
 
 export function bytes(n: number): string {

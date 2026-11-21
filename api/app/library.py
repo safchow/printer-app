@@ -14,7 +14,9 @@ Rules:
   every copy is kept until it is deleted in the app; a file deleted on the
   printer stays here;
 - new files have no label (the Inbox) until the user gives them one;
-- each print the app watches becomes a print_job row; the app never starts one.
+- each print the app watches becomes a print_job row. The app starts a print
+  only when asked in the UI (POST /api/printers/{id}/print, app/controls.py),
+  and only of a file already on that printer: nothing is uploaded.
 """
 
 from __future__ import annotations
@@ -36,6 +38,7 @@ from . import gcode_meta
 from .config import PrinterConfig
 from .db import Label, PrintJob, StoredFile
 from .drivers import PrinterStatus
+from .drivers.base import ControlError
 from .gcode import MAX_BYTES, TIMEOUT, gcode_url
 
 log = logging.getLogger(__name__)
@@ -109,8 +112,11 @@ class Library:
         name = filename.rsplit("/", 1)[-1]
         with Session(self.engine) as s:
             row = s.exec(select(StoredFile).where(StoredFile.sha256 == sha)).first()
+            printer_path = filename.lstrip("/") if printer_id else None
             if row:
                 row.filename, row.last_seen = name, now()
+                if printer_path:
+                    row.printer_id, row.printer_path = printer_id, printer_path
                 s.add(row)
                 s.commit()
                 s.refresh(row)
@@ -133,7 +139,8 @@ class Library:
                 (self.root / "thumbs" / f"{sha}.png").write_bytes(thumb)
                 meta["thumbnail"] = True
             row = StoredFile(sha256=sha, filename=name, size=dest.stat().st_size, path=rel, source=source,
-                             printer_id=printer_id, meta=meta, first_seen=now(), last_seen=now())
+                             printer_id=printer_id, printer_path=printer_path, meta=meta,
+                             first_seen=now(), last_seen=now())
             s.add(row)
             s.commit()
             s.refresh(row)
@@ -361,7 +368,8 @@ class Library:
         label = s.get(Label, f.label_id) if f.label_id else None
         return {
             "id": f.id, "sha256": f.sha256, "filename": f.filename, "size": f.size, "source": f.source,
-            "printer_id": f.printer_id, "label": label.name if label else None, "meta": f.meta,
+            "printer_id": f.printer_id, "printer_path": self._printer_path(s, f) if f.printer_id else None,
+            "label": label.name if label else None, "meta": f.meta,
             "thumbnail": bool(f.meta.get("thumbnail")),
             "first_seen": _utc(f.first_seen), "last_seen": _utc(f.last_seen),
             "prints": len(jobs), "last_printed": _utc(jobs[0].started_at) if jobs else None,
@@ -393,6 +401,39 @@ class Library:
             jobs = s.exec(select(PrintJob).where(PrintJob.file_id == f.id).order_by(PrintJob.started_at.desc())).all()
             out["jobs"] = [self.job_dict(j) for j in jobs]
             return out
+
+    # --- printing a stored file ------------------------------------------------------------
+
+    @staticmethod
+    def _printer_path(s: Session, f: StoredFile) -> str:
+        """Where this file sits on its printer: as captured, else its latest print's name, else its name."""
+        if f.printer_path:
+            return f.printer_path
+        job = s.exec(select(PrintJob).where(PrintJob.file_id == f.id, PrintJob.printer_id == f.printer_id)
+                     .order_by(PrintJob.started_at.desc())).first()
+        return job.filename if job else f.filename
+
+    def print_path(self, file_id: int, printer_id: str) -> str:
+        """The printer-side path to start a print of this stored file with, or ControlError.
+
+        The app only starts files that came from that printer (they're already
+        in its G-code folder; nothing is uploaded), and only the newest copy
+        seen under that name, so a print never starts a different file that
+        was later sent under the same name."""
+        with Session(self.engine) as s:
+            f = s.get(StoredFile, file_id)
+            if not f:
+                raise ControlError(404, "no such file")
+            if f.printer_id != printer_id:
+                raise ControlError(409, "this file wasn't sent to that printer, so it isn't on it")
+            path = self._printer_path(s, f)
+            name = path.rsplit("/", 1)[-1]
+            same = s.exec(select(StoredFile).where(StoredFile.printer_id == printer_id, StoredFile.id != f.id,
+                                                   StoredFile.last_seen > f.last_seen)).all()
+            if any(self._printer_path(s, o) == path or (not o.printer_path and o.filename == name) for o in same):
+                raise ControlError(409, "a newer file with the same name was sent to the printer after this one, "
+                                        "so the printer's copy isn't this file any more")
+            return path
 
     def set_label(self, file_id: int, name: str | None) -> dict | None:
         name = (name or "").strip()[:60] or None

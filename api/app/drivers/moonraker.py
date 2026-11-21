@@ -27,8 +27,8 @@ from .base import ControlError, ControlsDisabled, Fan, PrinterDriver, PrinterSta
 log = logging.getLogger(__name__)
 
 READ_ONLY_METHODS = frozenset({"printer.objects.subscribe"})
-CONTROL_METHODS = frozenset({"printer.print.pause", "printer.print.resume", "printer.print.cancel",
-                             "printer.gcode.script"})
+CONTROL_METHODS = frozenset({"printer.print.start", "printer.print.pause", "printer.print.resume",
+                             "printer.print.cancel", "printer.gcode.script"})
 # The only G-code this driver will ever send, whole-line matches.
 ALLOWED_GCODE = tuple(re.compile(p) for p in (
     r"M220 S([2-9]0|1[0-5]0|160)",  # 20-160 in steps of 10
@@ -38,6 +38,7 @@ ALLOWED_GCODE = tuple(re.compile(p) for p in (
     r"SET_FAN_SPEED FAN=[A-Za-z0-9_]{1,40} SPEED=(0|0\.[1-9]|1)",
     r"SET_PIN PIN=[A-Za-z0-9_]{1,40} VALUE=[01]",
     r"PAUSE|RESUME|CANCEL_PRINT",
+    r'SDCARD_PRINT_FILE FILENAME="[^"\x00-\x1f\x7f]{1,255}"',  # path also checked by print_path_ok()
 ))
 # Notices Moonraker pushes about files and jobs; logged and passed to notice listeners (file capture).
 FILE_NOTICES = frozenset({"notify_filelist_changed", "notify_history_changed"})
@@ -48,6 +49,18 @@ COMMAND_TIMEOUT = 10.0
 
 def gcode_allowed(script: str) -> bool:
     return any(p.fullmatch(script) for p in ALLOWED_GCODE)
+
+
+PRINT_SUFFIXES = (".gcode", ".3mf")
+
+
+def print_path_ok(path: str) -> bool:
+    """A file path inside the G-code folder that's safe to hand to printer.print.start."""
+    if not path or len(path) > 255 or path.startswith("/") or not path.lower().endswith(PRINT_SUFFIXES):
+        return False
+    if any(ord(c) < 32 or c in '"\\\x7f' for c in path):
+        return False
+    return all(part not in ("", ".", "..") and not part.startswith(".") for part in path.split("/"))
 
 BASE_OBJECTS = (
     "print_stats",
@@ -182,6 +195,8 @@ class MoonrakerDriver(PrinterDriver):
             raise MethodNotAllowed(f"{method} is not allowed: controls are off")
         if method == "printer.gcode.script" and not gcode_allowed(str((params or {}).get("script", ""))):
             raise MethodNotAllowed(f"G-code {params!r} is not allowed")
+        if method == "printer.print.start" and not print_path_ok(str((params or {}).get("filename", ""))):
+            raise MethodNotAllowed(f"print file {params!r} is not allowed")
 
     async def _call(self, ws, method: str, params: dict[str, Any] | None = None) -> int:
         self._check(method, params)
@@ -312,6 +327,18 @@ class MoonrakerDriver(PrinterDriver):
         if "error" in msg:
             raise ControlError(502, f"the printer refused: {msg['error'].get('message', 'unknown error')}")
         return method
+
+    async def start_print(self, path: str) -> str:
+        self._require_enabled()
+        if not print_path_ok(path):
+            raise ControlError(422, "that file name can't be sent to the printer")
+        msg = await self._command("printer.print.start", {"filename": path})
+        if "error" in msg and (msg["error"] or {}).get("code") == -32601:
+            # No printer.print.start on this Moonraker build: Klipper's own command does the same.
+            return await self._gcode(f'SDCARD_PRINT_FILE FILENAME="{path}"')
+        if "error" in msg:
+            raise ControlError(502, f"the printer refused: {(msg['error'] or {}).get('message', 'unknown error')}")
+        return f"printer.print.start {path}"
 
     async def pause(self) -> str:
         return await self._print_action("printer.print.pause")

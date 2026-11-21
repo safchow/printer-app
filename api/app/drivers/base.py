@@ -138,6 +138,10 @@ class PrinterDriver(abc.ABC):
     # don't report layers themselves. Set by the app to GcodeCache.layer_at.
     layer_lookup: Callable[[str, str | None, int | None], tuple[int, int] | None] | None = None
 
+    async def start_print(self, path: str) -> str:
+        """Start printing a file already in the printer's own storage (path inside its G-code folder)."""
+        raise ControlsDisabled("controls are not supported for this printer type")
+
     async def pause(self) -> str:
         raise ControlsDisabled("controls are not supported for this printer type")
 
