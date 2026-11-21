@@ -420,6 +420,22 @@ class FakeMoonraker:
             await fake.notify("notify_filelist_changed", [{"action": "create_file", "item": item}])
             return JSONResponse({"result": {"item": item, "print_started": False, "action": "create_file"}}, status_code=201)
 
+        async def creality_upload(request: Request):
+            # A Creality printer's own upload server (port 80 on a real one): POST /upload/<encoded name>.
+            fake.http_requests.append(request.url.path)
+            if fake.offline:
+                return JSONResponse({"error": "offline"}, status_code=503)
+            if fake.upload_fails:
+                return JSONResponse({"code": 500, "message": "No space left on device"})
+            raw = b"Content-Type: " + request.headers["content-type"].encode() + b"\r\n\r\n" + await request.body()
+            parts = [p for p in BytesParser(policy=email_default).parsebytes(raw).iter_parts() if p.get_filename()]
+            path = request.path_params["name"]
+            fake.files[path] = parts[0].get_payload(decode=True)
+            fake.uploads.append(path)
+            item = {"root": "gcodes", "path": path, "size": len(fake.files[path]), "modified": time.time()}
+            await fake.notify("notify_filelist_changed", [{"action": "create_file", "item": item}])
+            return JSONResponse({"code": 200, "message": "OK"})
+
         async def scenario(request: Request):
             await fake.push(fake.set_scenario(request.path_params["name"]))
             return JSONResponse({"scenario": fake.scenario})
@@ -445,6 +461,7 @@ class FakeMoonraker:
             Route("/printer/info", printer_info),
             Route("/printer/objects/list", objects_list),
             Route("/server/files/upload", file_upload, methods=["POST"]),
+            Route("/upload/{name:path}", creality_upload, methods=["POST"]),
             Route("/server/files/gcodes/{path:path}", gcode_file),
             Route("/fake/scenario/{name}", scenario, methods=["POST"]),
             Route("/fake/offline", offline, methods=["POST"]),

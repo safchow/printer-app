@@ -83,6 +83,7 @@ printers:
     port: {fake_server.port}
     camera: creality_webrtc
     cfs: true
+    upload_port: {fake_server.port}
 """)
     return path
 

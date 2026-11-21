@@ -85,6 +85,11 @@ class PrinterConfig(BaseModel):
     camera: CameraType = "none"
     camera_port: int = 8000
     cfs: bool = False
+    # How Print sends a file: "creality" = the printer's own upload server (POST :upload_port/upload/<name>,
+    # what Creality Print uses; stock K1C's Moonraker answers 500 "upload file fail" to /server/files/upload),
+    # "moonraker" = /server/files/upload. "auto" = creality for Creality printers (CFS or Creality camera).
+    upload: Literal["auto", "creality", "moonraker"] = "auto"
+    upload_port: int = 80
     bed_size_mm: tuple[float, float, float] | None = None
     moonraker: MoonrakerObjects = Field(default_factory=MoonrakerObjects)
 
@@ -95,7 +100,13 @@ class PrinterConfig(BaseModel):
             raise ValueError("id must be lowercase letters, digits, - or _ (max 40)")
         return v
 
-    @field_validator("port", "camera_port")
+    @property
+    def upload_kind(self) -> str:
+        if self.upload != "auto":
+            return self.upload
+        return "creality" if self.cfs or self.camera == "creality_webrtc" else "moonraker"
+
+    @field_validator("port", "camera_port", "upload_port")
     @classmethod
     def _port(cls, v: int) -> int:
         if not 0 < v < 65536:
