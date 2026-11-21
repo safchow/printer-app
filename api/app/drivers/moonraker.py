@@ -6,7 +6,8 @@ Rules this driver enforces, whatever the UI does:
   before the next single attempt;
 - only methods in READ_ONLY_METHODS are sent, plus, when controls are enabled,
   CONTROL_METHODS; G-code goes out only if it matches ALLOWED_GCODE exactly;
-- one control at a time, never retried.
+- one control at a time, never retried; a print sends one HTTP upload of the
+  app's copy, then one printer.print.start.
 """
 
 from __future__ import annotations
@@ -17,8 +18,10 @@ import json
 import logging
 import re
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
+import httpx
 import websockets
 
 from ..config import PrinterConfig
@@ -45,6 +48,7 @@ FILE_NOTICES = frozenset({"notify_filelist_changed", "notify_history_changed"})
 PRINT_MACROS = {"printer.print.pause": "PAUSE", "printer.print.resume": "RESUME",
                 "printer.print.cancel": "CANCEL_PRINT"}
 COMMAND_TIMEOUT = 10.0
+UPLOAD_TIMEOUT = httpx.Timeout(30.0, write=600.0, read=120.0)
 
 
 def gcode_allowed(script: str) -> bool:
@@ -327,6 +331,24 @@ class MoonrakerDriver(PrinterDriver):
         if "error" in msg:
             raise ControlError(502, f"the printer refused: {msg['error'].get('message', 'unknown error')}")
         return method
+
+    async def upload_file(self, local: Path, path: str) -> str:
+        """One HTTP upload of a file into the G-code folder (POST /server/files/upload). Never retried."""
+        self._require_enabled()
+        if not print_path_ok(path):
+            raise ControlError(422, "that file name can't be sent to the printer")
+        folder, _, name = path.rpartition("/")
+        url = f"http://{self.config.host}:{self.config.port}/server/files/upload"
+        try:
+            async with httpx.AsyncClient(timeout=UPLOAD_TIMEOUT) as client:
+                with local.open("rb") as fh:
+                    r = await client.post(url, data={"root": "gcodes", "path": folder},
+                                          files={"file": (name, fh, "application/octet-stream")})
+        except httpx.HTTPError as exc:
+            raise ControlError(502, f"couldn't upload the file to the printer ({type(exc).__name__})") from exc
+        if r.status_code not in (200, 201):
+            raise ControlError(502, f"the printer refused the upload (HTTP {r.status_code})")
+        return f"upload {path}"
 
     async def start_print(self, path: str) -> str:
         self._require_enabled()

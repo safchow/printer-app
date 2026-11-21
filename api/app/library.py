@@ -15,8 +15,9 @@ Rules:
   printer stays here;
 - new files have no label (the Inbox) until the user gives them one;
 - each print the app watches becomes a print_job row. The app starts a print
-  only when asked in the UI (POST /api/printers/{id}/print, app/controls.py),
-  and only of a file already on that printer: nothing is uploaded.
+  only when asked in the UI (POST /api/printers/{id}/print, app/controls.py):
+  it uploads its own copy to UPLOAD_FOLDER/ on the printer, then starts it, so
+  anything kept here can be printed again after the printer's storage is cleared.
 """
 
 from __future__ import annotations
@@ -51,8 +52,19 @@ IDLE_END_SECONDS = 60.0
 # A print seen again with the same file and a start time this close is the same print.
 SAME_PRINT_SECONDS = 300.0
 SUFFIXES = (".gcode", ".3mf")
+# Folder in the printer's G-code folder where the app uploads files it prints; never captured back.
+UPLOAD_FOLDER = "printer-app"
 ACTIVE = ("printing", "paused")
 ENDED = ("complete", "cancelled", "error")
+
+
+def upload_path(filename: str) -> str:
+    """Where the app puts a stored file on the printer: its own folder, a plain version of the name."""
+    stem, dot, suffix = filename.rpartition(".")
+    if not dot or f".{suffix.lower()}" not in SUFFIXES:
+        stem, suffix = filename, "gcode"
+    stem = re.sub(r"[^A-Za-z0-9 ._()+,-]", "_", stem).strip(" .")[:120] or "print"
+    return f"{UPLOAD_FOLDER}/{stem}.{suffix.lower()}"
 
 
 def wanted(item: dict[str, Any]) -> str | None:
@@ -63,6 +75,8 @@ def wanted(item: dict[str, Any]) -> str | None:
     parts = path.split("/")
     if not path or any(p.startswith(".") or p in ("", "..") for p in parts):
         return None  # .thumbs/ and other hidden folders
+    if parts[0] == UPLOAD_FOLDER:
+        return None  # the app's own uploads: we already have them
     return path if path.lower().endswith(SUFFIXES) else None
 
 
@@ -89,6 +103,7 @@ class Library:
         self._pending: dict[tuple[str, str], asyncio.Task] = {}
         self._jobs: dict[str, int] = {}  # printer -> open print_job id
         self._seen: dict[str, tuple[bool, str | None]] = {}
+        self._uploaded: dict[tuple[str, str], int] = {}  # (printer, path) -> stored file the app put there
         self._idle: dict[str, asyncio.Task] = {}  # printer -> pending "it ended unseen" close
         (root / "files").mkdir(parents=True, exist_ok=True)
         (root / "thumbs").mkdir(parents=True, exist_ok=True)
@@ -112,11 +127,8 @@ class Library:
         name = filename.rsplit("/", 1)[-1]
         with Session(self.engine) as s:
             row = s.exec(select(StoredFile).where(StoredFile.sha256 == sha)).first()
-            printer_path = filename.lstrip("/") if printer_id else None
             if row:
                 row.filename, row.last_seen = name, now()
-                if printer_path:
-                    row.printer_id, row.printer_path = printer_id, printer_path
                 s.add(row)
                 s.commit()
                 s.refresh(row)
@@ -139,8 +151,7 @@ class Library:
                 (self.root / "thumbs" / f"{sha}.png").write_bytes(thumb)
                 meta["thumbnail"] = True
             row = StoredFile(sha256=sha, filename=name, size=dest.stat().st_size, path=rel, source=source,
-                             printer_id=printer_id, printer_path=printer_path, meta=meta,
-                             first_seen=now(), last_seen=now())
+                             printer_id=printer_id, meta=meta, first_seen=now(), last_seen=now())
             s.add(row)
             s.commit()
             s.refresh(row)
@@ -228,7 +239,7 @@ class Library:
                 await asyncio.wait_for(asyncio.shield(task), timeout)
             except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
                 pass
-        return self.latest_named(filename)
+        return self.stored_for(printer_id, filename)
 
     async def download(self, printer_id: str, path: str, source: str,
                        expected_size: int | None = None) -> StoredFile | None:
@@ -313,7 +324,7 @@ class Library:
                     self._jobs[status.id] = again.id
                     log.info("%s: print continues: %s", status.id, status.filename)
                     return
-                f = self.latest_named(status.filename)
+                f = self.stored_for(status.id, status.filename)
                 job = PrintJob(printer_id=status.id, filename=status.filename, file_id=f.id if f else None,
                                started_at=status.started_at or now(), result="printing")
                 s.add(job)
@@ -368,8 +379,7 @@ class Library:
         label = s.get(Label, f.label_id) if f.label_id else None
         return {
             "id": f.id, "sha256": f.sha256, "filename": f.filename, "size": f.size, "source": f.source,
-            "printer_id": f.printer_id, "printer_path": self._printer_path(s, f) if f.printer_id else None,
-            "label": label.name if label else None, "meta": f.meta,
+            "printer_id": f.printer_id, "label": label.name if label else None, "meta": f.meta,
             "thumbnail": bool(f.meta.get("thumbnail")),
             "first_seen": _utc(f.first_seen), "last_seen": _utc(f.last_seen),
             "prints": len(jobs), "last_printed": _utc(jobs[0].started_at) if jobs else None,
@@ -404,36 +414,22 @@ class Library:
 
     # --- printing a stored file ------------------------------------------------------------
 
-    @staticmethod
-    def _printer_path(s: Session, f: StoredFile) -> str:
-        """Where this file sits on its printer: as captured, else its latest print's name, else its name."""
-        if f.printer_path:
-            return f.printer_path
-        job = s.exec(select(PrintJob).where(PrintJob.file_id == f.id, PrintJob.printer_id == f.printer_id)
-                     .order_by(PrintJob.started_at.desc())).first()
-        return job.filename if job else f.filename
+    def upload_target(self, file_id: int) -> tuple[Path, str]:
+        """Our copy of a stored file, and the path it goes to in the printer's G-code folder."""
+        f = self.get(file_id)
+        if not f or not self.file_path(f).is_file():
+            raise ControlError(404, "no such file")
+        return self.file_path(f), upload_path(f.filename)
 
-    def print_path(self, file_id: int, printer_id: str) -> str:
-        """The printer-side path to start a print of this stored file with, or ControlError.
+    def mark_uploaded(self, printer_id: str, path: str, file_id: int) -> None:
+        """Remember which stored file the app just put at `path`, so the print links to it."""
+        self._uploaded[(printer_id, path)] = file_id
 
-        The app only starts files that came from that printer (they're already
-        in its G-code folder; nothing is uploaded), and only the newest copy
-        seen under that name, so a print never starts a different file that
-        was later sent under the same name."""
-        with Session(self.engine) as s:
-            f = s.get(StoredFile, file_id)
-            if not f:
-                raise ControlError(404, "no such file")
-            if f.printer_id != printer_id:
-                raise ControlError(409, "this file wasn't sent to that printer, so it isn't on it")
-            path = self._printer_path(s, f)
-            name = path.rsplit("/", 1)[-1]
-            same = s.exec(select(StoredFile).where(StoredFile.printer_id == printer_id, StoredFile.id != f.id,
-                                                   StoredFile.last_seen > f.last_seen)).all()
-            if any(self._printer_path(s, o) == path or (not o.printer_path and o.filename == name) for o in same):
-                raise ControlError(409, "a newer file with the same name was sent to the printer after this one, "
-                                        "so the printer's copy isn't this file any more")
-            return path
+    def stored_for(self, printer_id: str, filename: str) -> StoredFile | None:
+        """The stored file a print of `filename` is: the one the app uploaded there, else the latest by name."""
+        fid = self._uploaded.get((printer_id, filename))
+        f = self.get(fid) if fid is not None else None
+        return f or self.latest_named(filename)
 
     def set_label(self, file_id: int, name: str | None) -> dict | None:
         name = (name or "").strip()[:60] or None

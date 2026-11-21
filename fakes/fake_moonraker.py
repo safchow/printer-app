@@ -26,6 +26,8 @@ import contextlib
 import copy
 import json
 import re
+from email.parser import BytesParser
+from email.policy import default as email_default
 import time
 from typing import Any
 
@@ -105,6 +107,8 @@ class FakeMoonraker:
         self.gcode_size = len(fake_gcode().encode())
         self.scripts: list[str] = []
         self.started: list[str] = []  # files printer.print.start was asked to print
+        self.uploads: list[str] = []  # paths POSTed to /server/files/upload
+        self.upload_fails = False
         self.tick_seconds = tick_seconds
         self.filename = filename
         self.start_progress = start_progress
@@ -395,6 +399,27 @@ class FakeMoonraker:
                 return JSONResponse({"error": "not found"}, status_code=404)
             return PlainTextResponse(fake_gcode())
 
+        async def file_upload(request: Request):
+            # Moonraker's POST /server/files/upload (multipart: file, root, path).
+            fake.http_requests.append(request.url.path)
+            if fake.offline:
+                return JSONResponse({"error": "offline"}, status_code=503)
+            if fake.upload_fails:
+                return JSONResponse({"error": {"message": "No space left on device"}}, status_code=500)
+            raw = b"Content-Type: " + request.headers["content-type"].encode() + b"\r\n\r\n" + await request.body()
+            fields, content, name = {}, b"", ""
+            for part in BytesParser(policy=email_default).parsebytes(raw).iter_parts():
+                if part.get_filename():
+                    name, content = part.get_filename(), part.get_payload(decode=True)
+                else:
+                    fields[part.get_param("name", header="content-disposition")] = part.get_content().strip()
+            path = f"{fields['path'].strip('/')}/{name}" if fields.get("path") else name
+            fake.files[path] = content
+            fake.uploads.append(path)
+            item = {"root": fields.get("root", "gcodes"), "path": path, "size": len(content), "modified": time.time()}
+            await fake.notify("notify_filelist_changed", [{"action": "create_file", "item": item}])
+            return JSONResponse({"result": {"item": item, "print_started": False, "action": "create_file"}}, status_code=201)
+
         async def scenario(request: Request):
             await fake.push(fake.set_scenario(request.path_params["name"]))
             return JSONResponse({"scenario": fake.scenario})
@@ -419,6 +444,7 @@ class FakeMoonraker:
             Route("/server/info", server_info),
             Route("/printer/info", printer_info),
             Route("/printer/objects/list", objects_list),
+            Route("/server/files/upload", file_upload, methods=["POST"]),
             Route("/server/files/gcodes/{path:path}", gcode_file),
             Route("/fake/scenario/{name}", scenario, methods=["POST"]),
             Route("/fake/offline", offline, methods=["POST"]),

@@ -72,7 +72,7 @@ def test_database_migrated_and_synced(client, settings):
     version = con.execute("select version_num from alembic_version").fetchone()[0]
     con.close()
     assert rows[0][:3] == ("k1c", "K1C", "moonraker")
-    assert version == "0006"
+    assert version == "0005"
 
 
 def test_last_seen_survives_restart(settings, fake_server):

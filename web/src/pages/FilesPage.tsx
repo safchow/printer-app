@@ -16,6 +16,7 @@ import {
   printBlocker,
   printedLine,
   printFile,
+  printTarget,
   RESULT_LABEL,
   setLabel,
   useFile,
@@ -223,7 +224,7 @@ function PrintConfirm({
   const { config } = usePrinters();
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const blocker = printBlocker(f, printer, !!config?.controls_enabled);
+  const blocker = printBlocker(printer, !!config?.controls_enabled);
   const m = f.meta;
   const mat = material(m);
 
@@ -251,7 +252,7 @@ function PrintConfirm({
       <DialogContent>
         <DialogTitle className="m-0 text-base font-semibold break-words">Print {f.filename}?</DialogTitle>
         <DialogDescription className="m-0 text-sm text-muted-foreground">
-          {printer ? `${printer.name} starts it straight away.` : "The printer starts it straight away."} Check the plate is clear
+          The app sends its copy ({bytes(f.size)}) to {printer?.name ?? "the printer"}, which starts it straight away. Check the plate is clear
           {mat ? ` and ${mat} is loaded` : " and the right filament is loaded"}.
         </DialogDescription>
         <dl className="m-0 grid grid-cols-3 gap-x-4 gap-y-3 rounded-lg border px-4 py-3">
@@ -267,9 +268,6 @@ function PrintConfirm({
             }
           />
         </dl>
-        {f.printer_path && f.printer_path !== f.filename && (
-          <p className="m-0 text-[13px] text-muted-foreground break-words">On the printer as {f.printer_path}</p>
-        )}
         {(error || blocker) && (
           <p role="alert" className="m-0 text-sm text-destructive">
             {error ?? blocker}
@@ -282,7 +280,7 @@ function PrintConfirm({
             </Button>
           </DialogClose>
           <Button variant="brand" onClick={start} disabled={busy || !!blocker}>
-            <PrinterIcon /> {busy ? "Starting…" : "Start print"}
+            <PrinterIcon /> {busy ? "Sending…" : "Start print"}
           </Button>
         </div>
       </DialogContent>
@@ -298,8 +296,8 @@ function FilePanel({ id, labels, onClose, onChanged }: { id: number; labels: Lab
   const [sent, setSent] = React.useState(false);
   const [problem, setProblem] = React.useState<string | null>(null);
   const printerName = (pid: string | null) => printers.find((p) => p.id === pid)?.name ?? pid ?? "";
-  const printer = printers.find((p) => p.id === f?.printer_id);
-  const blocker = f ? printBlocker(f, printer, !!config?.controls_enabled) : null;
+  const printer = f ? printTarget(f, printers) : undefined;
+  const blocker = printBlocker(printer, !!config?.controls_enabled);
 
   const changeLabel = async (label: string | null) => {
     try {

@@ -301,16 +301,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/printers/{printer_id}/print")
     async def control_print(printer_id: str, body: PrintBody, request: Request) -> dict:
-        """Start printing a captured file that's already on this printer (nothing is uploaded)."""
-        if not hub_of().get(printer_id):
+        """Upload the app's copy of a stored file to the printer, then start it."""
+        driver = hub_of().get(printer_id)
+        if not driver:
             raise HTTPException(404, "no such printer")
         if not app.state.controls.enabled:
             raise HTTPException(501, "controls are turned off on this server (CONTROLS_ENABLED)")
+        lib = library_of()
         try:
-            path = library_of().print_path(body.file_id, printer_id)
+            local, path = lib.upload_target(body.file_id)
         except ControlError as exc:
             raise HTTPException(exc.status, exc.detail) from exc
-        return await control(printer_id, "print", {"file_id": body.file_id, "path": path}, request)
+        lib.mark_uploaded(printer_id, path, body.file_id)  # before the start, so the print links to this file
+        device = request.client.host if request.client else None
+        try:
+            command = await app.state.controls.run(driver, "print", {"file_id": body.file_id, "path": path},
+                                                   device, extra={"local": local})
+        except ControlsDisabled as exc:
+            raise HTTPException(501, str(exc)) from exc
+        except ControlError as exc:
+            raise HTTPException(exc.status, exc.detail) from exc
+        return {"ok": True, "command": command, "path": path}
 
     @app.get("/api/printers/{printer_id}/actions")
     def printer_actions(printer_id: str, limit: int = 20) -> list[dict]:

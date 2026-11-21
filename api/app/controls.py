@@ -76,7 +76,9 @@ class Controls:
         self._locks: dict[str, asyncio.Lock] = {}
         self._last: dict[str, float] = {}
 
-    async def run(self, driver: PrinterDriver, action: str, values: dict[str, Any], device: str | None) -> str:
+    async def run(self, driver: PrinterDriver, action: str, values: dict[str, Any], device: str | None,
+                  extra: dict[str, Any] | None = None) -> str:
+        """`values` are checked and logged; `extra` only goes to the driver (e.g. a local file path)."""
         command = None
         try:
             if not self.enabled:
@@ -90,7 +92,7 @@ class Controls:
                 if wait > 0:
                     raise ControlError(429, "one command per second, please")
                 self._last[driver.config.id] = time.monotonic()
-                command = await self._send(driver, action, values)
+                command = await self._send(driver, action, {**values, **(extra or {})})
         except ControlsDisabled as exc:
             self._log(driver, action, values, None, "refused", str(exc), device)
             raise
@@ -105,7 +107,8 @@ class Controls:
     async def _send(driver: PrinterDriver, action: str, v: dict[str, Any]) -> str:
         match action:
             case "print":
-                return await driver.start_print(v["path"])
+                uploaded = await driver.upload_file(v["local"], v["path"])
+                return f"{uploaded}; {await driver.start_print(v['path'])}"
             case "pause":
                 return await driver.pause()
             case "resume":

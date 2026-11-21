@@ -77,7 +77,7 @@ export async function deleteFile(id: number): Promise<void> {
   if (!r.ok) throw new Error(`the server answered ${r.status}`);
 }
 
-/** Ask the server to start printing a stored file on the printer it came from. Throws with the server's reason. */
+/** Ask the server to upload our copy of a stored file to a printer and start it. Throws with the server's reason. */
 export async function printFile(printerId: string, fileId: number): Promise<void> {
   const r = await fetch(`/api/printers/${encodeURIComponent(printerId)}/print`, {
     method: "POST",
@@ -90,11 +90,15 @@ export async function printFile(printerId: string, fileId: number): Promise<void
   }
 }
 
-/** Why Print can't be pressed for this file right now, or null when it can. The server checks again. */
-export function printBlocker(f: StoredFile, printer: Printer | undefined, controlsEnabled: boolean): string | null {
+/** The printer Print sends a file to: the one it came from, else the only (first) printer. */
+export function printTarget(f: StoredFile, printers: Printer[]): Printer | undefined {
+  return printers.find((p) => p.id === f.printer_id) ?? printers[0];
+}
+
+/** Why Print can't be pressed right now, or null when it can. The server checks again. */
+export function printBlocker(printer: Printer | undefined, controlsEnabled: boolean): string | null {
   if (!controlsEnabled) return "Printing from the app needs controls turned on (CONTROLS_ENABLED).";
-  if (!f.printer_id || f.source === "claude") return "This file was never sent to a printer, so there's nothing to print.";
-  if (!printer) return "The printer this file came from isn't set up any more.";
+  if (!printer) return "No printer is set up.";
   switch (printer.state) {
     case "printing":
     case "paused":
