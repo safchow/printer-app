@@ -29,6 +29,7 @@ MIN_GAP = 1.0
 SPEEDS = range(20, 161, 10)
 PRINT_STATES = ("printing", "paused")
 OFFLINE = ("offline", "connecting")
+READY_STATES = ("idle", "complete", "cancelled")  # a new print can start from these
 LIMITS = {"nozzle": 300, "bed": 100}
 MIN_HEAT = 30
 
@@ -38,6 +39,11 @@ def check(driver: PrinterDriver, action: str, values: dict[str, Any]) -> None:
     state = driver.status.state
     if state in OFFLINE:
         raise ControlError(409, "the printer is offline")
+    if action == "print":
+        if state in PRINT_STATES:
+            raise ControlError(409, "the printer is already printing")
+        if state not in READY_STATES:
+            raise ControlError(409, "the printer isn't ready (it reports an error); check it before printing")
     if action == "pause" and state != "printing":
         raise ControlError(409, "nothing is printing")
     if action == "resume" and state != "paused":
@@ -70,7 +76,9 @@ class Controls:
         self._locks: dict[str, asyncio.Lock] = {}
         self._last: dict[str, float] = {}
 
-    async def run(self, driver: PrinterDriver, action: str, values: dict[str, Any], device: str | None) -> str:
+    async def run(self, driver: PrinterDriver, action: str, values: dict[str, Any], device: str | None,
+                  extra: dict[str, Any] | None = None) -> str:
+        """`values` are checked and logged; `extra` only goes to the driver (e.g. a local file path)."""
         command = None
         try:
             if not self.enabled:
@@ -84,7 +92,7 @@ class Controls:
                 if wait > 0:
                     raise ControlError(429, "one command per second, please")
                 self._last[driver.config.id] = time.monotonic()
-                command = await self._send(driver, action, values)
+                command = await self._send(driver, action, {**values, **(extra or {})})
         except ControlsDisabled as exc:
             self._log(driver, action, values, None, "refused", str(exc), device)
             raise
@@ -98,6 +106,9 @@ class Controls:
     @staticmethod
     async def _send(driver: PrinterDriver, action: str, v: dict[str, Any]) -> str:
         match action:
+            case "print":
+                uploaded = await driver.upload_file(v["local"], v["path"])
+                return f"{uploaded}; {await driver.start_print(v['path'])}"
             case "pause":
                 return await driver.pause()
             case "resume":

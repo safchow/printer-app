@@ -14,7 +14,10 @@ Rules:
   every copy is kept until it is deleted in the app; a file deleted on the
   printer stays here;
 - new files have no label (the Inbox) until the user gives them one;
-- each print the app watches becomes a print_job row; the app never starts one.
+- each print the app watches becomes a print_job row. The app starts a print
+  only when asked in the UI (POST /api/printers/{id}/print, app/controls.py):
+  it uploads its own copy to UPLOAD_FOLDER/ on the printer, then starts it, so
+  anything kept here can be printed again after the printer's storage is cleared.
 """
 
 from __future__ import annotations
@@ -36,6 +39,7 @@ from . import gcode_meta
 from .config import PrinterConfig
 from .db import Label, PrintJob, StoredFile
 from .drivers import PrinterStatus
+from .drivers.base import ControlError
 from .gcode import MAX_BYTES, TIMEOUT, gcode_url
 
 log = logging.getLogger(__name__)
@@ -48,8 +52,19 @@ IDLE_END_SECONDS = 60.0
 # A print seen again with the same file and a start time this close is the same print.
 SAME_PRINT_SECONDS = 300.0
 SUFFIXES = (".gcode", ".3mf")
+# Folder in the printer's G-code folder where the app uploads files it prints; never captured back.
+UPLOAD_FOLDER = "printer-app"
 ACTIVE = ("printing", "paused")
 ENDED = ("complete", "cancelled", "error")
+
+
+def upload_path(filename: str) -> str:
+    """Where the app puts a stored file on the printer: its own folder, a plain version of the name."""
+    stem, dot, suffix = filename.rpartition(".")
+    if not dot or f".{suffix.lower()}" not in SUFFIXES:
+        stem, suffix = filename, "gcode"
+    stem = re.sub(r"[^A-Za-z0-9 ._()+,-]", "_", stem).strip(" .")[:120] or "print"
+    return f"{UPLOAD_FOLDER}/{stem}.{suffix.lower()}"
 
 
 def wanted(item: dict[str, Any]) -> str | None:
@@ -60,6 +75,8 @@ def wanted(item: dict[str, Any]) -> str | None:
     parts = path.split("/")
     if not path or any(p.startswith(".") or p in ("", "..") for p in parts):
         return None  # .thumbs/ and other hidden folders
+    if parts[0] == UPLOAD_FOLDER:
+        return None  # the app's own uploads: we already have them
     return path if path.lower().endswith(SUFFIXES) else None
 
 
@@ -86,6 +103,7 @@ class Library:
         self._pending: dict[tuple[str, str], asyncio.Task] = {}
         self._jobs: dict[str, int] = {}  # printer -> open print_job id
         self._seen: dict[str, tuple[bool, str | None]] = {}
+        self._uploaded: dict[tuple[str, str], int] = {}  # (printer, path) -> stored file the app put there
         self._idle: dict[str, asyncio.Task] = {}  # printer -> pending "it ended unseen" close
         (root / "files").mkdir(parents=True, exist_ok=True)
         (root / "thumbs").mkdir(parents=True, exist_ok=True)
@@ -221,7 +239,7 @@ class Library:
                 await asyncio.wait_for(asyncio.shield(task), timeout)
             except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
                 pass
-        return self.latest_named(filename)
+        return self.stored_for(printer_id, filename)
 
     async def download(self, printer_id: str, path: str, source: str,
                        expected_size: int | None = None) -> StoredFile | None:
@@ -306,7 +324,7 @@ class Library:
                     self._jobs[status.id] = again.id
                     log.info("%s: print continues: %s", status.id, status.filename)
                     return
-                f = self.latest_named(status.filename)
+                f = self.stored_for(status.id, status.filename)
                 job = PrintJob(printer_id=status.id, filename=status.filename, file_id=f.id if f else None,
                                started_at=status.started_at or now(), result="printing")
                 s.add(job)
@@ -393,6 +411,25 @@ class Library:
             jobs = s.exec(select(PrintJob).where(PrintJob.file_id == f.id).order_by(PrintJob.started_at.desc())).all()
             out["jobs"] = [self.job_dict(j) for j in jobs]
             return out
+
+    # --- printing a stored file ------------------------------------------------------------
+
+    def upload_target(self, file_id: int) -> tuple[Path, str]:
+        """Our copy of a stored file, and the path it goes to in the printer's G-code folder."""
+        f = self.get(file_id)
+        if not f or not self.file_path(f).is_file():
+            raise ControlError(404, "no such file")
+        return self.file_path(f), upload_path(f.filename)
+
+    def mark_uploaded(self, printer_id: str, path: str, file_id: int) -> None:
+        """Remember which stored file the app just put at `path`, so the print links to it."""
+        self._uploaded[(printer_id, path)] = file_id
+
+    def stored_for(self, printer_id: str, filename: str) -> StoredFile | None:
+        """The stored file a print of `filename` is: the one the app uploaded there, else the latest by name."""
+        fid = self._uploaded.get((printer_id, filename))
+        f = self.get(fid) if fid is not None else None
+        return f or self.latest_named(filename)
 
     def set_label(self, file_id: int, name: str | None) -> dict | None:
         name = (name or "").strip()[:60] or None

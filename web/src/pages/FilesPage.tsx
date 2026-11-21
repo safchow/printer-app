@@ -1,7 +1,7 @@
 import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Link, useSearchParams } from "react-router-dom";
-import { Box, Download, Inbox, Search, Tag, Trash2, X } from "lucide-react";
+import { Box, CheckCircle2, Download, Inbox, Printer as PrinterIcon, Search, Tag, Trash2, X } from "lucide-react";
 import { AppHeader } from "@/components/AppHeader";
 import { GcodeFileView } from "@/components/PrintView";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,10 @@ import {
   deleteFile,
   type FileFilter,
   material,
+  printBlocker,
   printedLine,
+  printFile,
+  printTarget,
   RESULT_LABEL,
   setLabel,
   useFile,
@@ -22,7 +25,7 @@ import {
   useLabels,
 } from "@/lib/files";
 import { dayAndClock, duration, shortDay } from "@/lib/format";
-import type { LabelCount, StoredFile } from "@/lib/types";
+import type { LabelCount, Printer, StoredFile } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 function useFilter(): [FileFilter, (f: FileFilter) => void] {
@@ -204,12 +207,97 @@ function Fact({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+/** "Print" on a file: confirm, then one request to the server, which checks everything again. */
+function PrintConfirm({
+  f,
+  printer,
+  open,
+  onOpenChange,
+  onSent,
+}: {
+  f: StoredFile;
+  printer: Printer | undefined;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSent: () => void;
+}) {
+  const { config } = usePrinters();
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const blocker = printBlocker(printer, !!config?.controls_enabled);
+  const m = f.meta;
+  const mat = material(m);
+
+  React.useEffect(() => {
+    if (open) setError(null);
+  }, [open]);
+
+  const start = async () => {
+    if (!printer || blocker) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await printFile(printer.id, f.id);
+      onSent();
+      onOpenChange(false);
+    } catch (e) {
+      setError(`Not started: ${(e as Error).message}.`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
+      <DialogContent>
+        <DialogTitle className="m-0 text-base font-semibold break-words">Print {f.filename}?</DialogTitle>
+        <DialogDescription className="m-0 text-sm text-muted-foreground">
+          The app sends its copy ({bytes(f.size)}) to {printer?.name ?? "the printer"}, which starts it straight away. Check the plate is clear
+          {mat ? ` and ${mat} is loaded` : " and the right filament is loaded"}.
+        </DialogDescription>
+        <dl className="m-0 grid grid-cols-3 gap-x-4 gap-y-3 rounded-lg border px-4 py-3">
+          <Fact label="Print time" value={m.estimated_seconds != null ? `about ${duration(m.estimated_seconds)}` : "Not known"} />
+          <Fact label="Filament" value={m.filament_g != null ? `${m.filament_g} g` : "--"} />
+          <Fact
+            label="Material"
+            value={
+              <span className="inline-flex items-center gap-1.5">
+                <Swatches f={f} />
+                {mat ?? "--"}
+              </span>
+            }
+          />
+        </dl>
+        {(error || blocker) && (
+          <p role="alert" className="m-0 text-sm text-destructive">
+            {error ?? blocker}
+          </p>
+        )}
+        <div className="flex justify-end gap-2">
+          <DialogClose asChild>
+            <Button variant="outline" disabled={busy}>
+              Cancel
+            </Button>
+          </DialogClose>
+          <Button variant="brand" onClick={start} disabled={busy || !!blocker}>
+            <PrinterIcon /> {busy ? "Sending…" : "Start print"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function FilePanel({ id, labels, onClose, onChanged }: { id: number; labels: LabelCount[]; onClose: () => void; onChanged: () => void }) {
   const { data: f, error } = useFile(id);
-  const { printers } = usePrinters();
+  const { printers, config } = usePrinters();
   const [confirm, setConfirm] = React.useState(false);
+  const [printOpen, setPrintOpen] = React.useState(false);
+  const [sent, setSent] = React.useState(false);
   const [problem, setProblem] = React.useState<string | null>(null);
   const printerName = (pid: string | null) => printers.find((p) => p.id === pid)?.name ?? pid ?? "";
+  const printer = f ? printTarget(f, printers) : undefined;
+  const blocker = printBlocker(printer, !!config?.controls_enabled);
 
   const changeLabel = async (label: string | null) => {
     try {
@@ -308,17 +396,48 @@ function FilePanel({ id, labels, onClose, onChanged }: { id: number; labels: Lab
               </section>
 
               {problem && <p className="m-0 text-sm text-destructive">{problem}</p>}
+              {sent && (
+                <p role="status" className="m-0 flex items-center gap-2 rounded-lg border px-3.5 py-2.5 text-sm">
+                  <CheckCircle2 className="size-4 shrink-0 text-brand" aria-hidden="true" />
+                  <span>
+                    Sent to {printer?.name ?? "the printer"}. It's starting now.{" "}
+                    {printer && (
+                      <Link to={`/printers/${encodeURIComponent(printer.id)}`} className="underline underline-offset-2">
+                        Watch it
+                      </Link>
+                    )}
+                  </span>
+                </p>
+              )}
 
-              <div className="flex flex-wrap justify-between gap-2 border-t pt-5">
-                <Button asChild variant="outline">
-                  <a href={`/api/files/${f.id}/raw`} download={f.filename}>
-                    <Download /> Download
-                  </a>
-                </Button>
-                <Button variant="ghost" className="text-destructive hover:bg-destructive/10" onClick={() => setConfirm(true)}>
-                  <Trash2 /> Delete
-                </Button>
+              <div className="flex flex-col gap-2 border-t pt-5">
+                <div className="flex flex-wrap justify-between gap-2">
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="brand" disabled={!!blocker} onClick={() => setPrintOpen(true)} title={blocker ?? undefined}>
+                      <PrinterIcon /> Print
+                    </Button>
+                    <Button asChild variant="outline">
+                      <a href={`/api/files/${f.id}/raw`} download={f.filename}>
+                        <Download /> Download
+                      </a>
+                    </Button>
+                  </div>
+                  <Button variant="ghost" className="text-destructive hover:bg-destructive/10" onClick={() => setConfirm(true)}>
+                    <Trash2 /> Delete
+                  </Button>
+                </div>
+                {blocker && !sent && <p className="m-0 text-[13px] text-muted-foreground">{blocker}</p>}
               </div>
+              <PrintConfirm
+                f={f}
+                printer={printer}
+                open={printOpen}
+                onOpenChange={setPrintOpen}
+                onSent={() => {
+                  setSent(true);
+                  onChanged();
+                }}
+              />
             </div>
           )}
 
