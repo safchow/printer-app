@@ -9,6 +9,7 @@ import { FilesPage } from "@/pages/FilesPage";
 import { HistoryEntryPage } from "@/pages/HistoryEntryPage";
 import { HistoryPage } from "@/pages/HistoryPage";
 import { PrinterPage } from "@/pages/PrinterPage";
+import { QueuePage } from "@/pages/QueuePage";
 import { queryClient } from "@/lib/queryClient";
 
 export default function App() {
@@ -23,6 +24,7 @@ export default function App() {
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/printers/:id" element={<PrinterPage />} />
                 <Route path="/files" element={<FilesPage />} />
+                <Route path="/queue" element={<QueuePage />} />
                 <Route path="/history" element={<HistoryPage />} />
                 <Route path="/history/:id" element={<HistoryEntryPage />} />
                 <Route path="*" element={<Dashboard />} />

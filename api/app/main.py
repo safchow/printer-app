@@ -27,6 +27,7 @@ from .guard import RequestGuard, parse_hosts
 from .library import Library
 from .themes import ThemeStore
 from .hub import Hub
+from .queue import EditBody, ItemBody, PrintQueue, QueueError
 from .timelapse import Timelapse
 from .relay import Go2rtc, decode_go2rtc_offer, encode_answer, fix_answer, fix_offer, pump, Stills
 
@@ -50,6 +51,12 @@ class LightBody(BaseModel):
 
 class PrintBody(BaseModel):
     file_id: int
+
+class MoveBody(BaseModel):
+    to: int = Field(ge=0)
+
+class PauseBody(BaseModel):
+    paused: bool
 
 class FileBody(BaseModel):
     label: str | None = Field(None, max_length=60)
@@ -103,10 +110,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 log.warning("time-lapses need the camera relay (GO2RTC_URL)")
             for driver in hub.drivers.values():
                 driver.on_status(tl.on_status)  # after the library's, which opens the print's history row
+        app.state.queue = None
+        if library:
+            app.state.queue = PrintQueue(engine, hub.drivers, start_stored, settings.controls_enabled)
+            for driver in hub.drivers.values():
+                driver.on_status(app.state.queue.on_status)  # after the library's, which keeps print history
         hub.start()
+        if app.state.queue:
+            app.state.queue.start()
         try:
             yield
         finally:
+            if app.state.queue:
+                await app.state.queue.stop()
             await hub.stop()
             await app.state.gcode.stop()
             if app.state.stills:
@@ -302,29 +318,79 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def control_light(printer_id: str, body: LightBody, request: Request) -> dict:
         return await control(printer_id, "light", body.model_dump(), request)
 
+    async def start_stored(printer_id: str, file_id: int, device: str | None) -> str:
+        """Upload the app's copy of a stored file to the printer, then start it.
+
+        The Print button and the print queue both come through here, so they share
+        the controls' checks, per-printer lock and action log. Raises ControlError.
+        """
+        driver = hub_of().get(printer_id)
+        if not driver:
+            raise ControlError(404, "no such printer")
+        if not app.state.controls.enabled:
+            raise ControlsDisabled("controls are turned off on this server (CONTROLS_ENABLED)")
+        lib = library_of()
+        local, path = lib.upload_target(file_id)
+        lib.mark_uploaded(printer_id, path, file_id)  # before the start, so the print links to this file
+        return await app.state.controls.run(driver, "print", {"file_id": file_id, "path": path},
+                                            device, extra={"local": local})
+
     @app.post("/api/printers/{printer_id}/print")
     async def control_print(printer_id: str, body: PrintBody, request: Request) -> dict:
         """Upload the app's copy of a stored file to the printer, then start it."""
-        driver = hub_of().get(printer_id)
-        if not driver:
-            raise HTTPException(404, "no such printer")
-        if not app.state.controls.enabled:
-            raise HTTPException(501, "controls are turned off on this server (CONTROLS_ENABLED)")
-        lib = library_of()
-        try:
-            local, path = lib.upload_target(body.file_id)
-        except ControlError as exc:
-            raise HTTPException(exc.status, exc.detail) from exc
-        lib.mark_uploaded(printer_id, path, body.file_id)  # before the start, so the print links to this file
         device = request.client.host if request.client else None
         try:
-            command = await app.state.controls.run(driver, "print", {"file_id": body.file_id, "path": path},
-                                                   device, extra={"local": local})
+            command = await start_stored(printer_id, body.file_id, device)
         except ControlsDisabled as exc:
             raise HTTPException(501, str(exc)) from exc
         except ControlError as exc:
             raise HTTPException(exc.status, exc.detail) from exc
+        _, path = library_of().upload_target(body.file_id)
         return {"ok": True, "command": command, "path": path}
+
+    # --- print queue (app/queue.py has the rules) ---
+
+    def queue_of() -> PrintQueue:
+        q = getattr(app.state, "queue", None)
+        if q is None:
+            raise HTTPException(501, "the print queue needs file capture turned on (CAPTURE_FILES)")
+        return q
+
+    def queue_call(fn, *args):
+        try:
+            return fn(*args)
+        except QueueError as exc:
+            raise HTTPException(exc.status, exc.detail) from exc
+
+    @app.get("/api/queue")
+    def queue_list() -> list[dict]:
+        return queue_of().everything()
+
+    @app.post("/api/queue")
+    def queue_add(body: ItemBody) -> dict:
+        return queue_call(queue_of().add, body)
+
+    @app.patch("/api/queue/{item_id}")
+    def queue_edit(item_id: int, body: EditBody) -> dict:
+        return queue_call(queue_of().edit, item_id, body)
+
+    @app.post("/api/queue/{item_id}/cancel")
+    def queue_cancel(item_id: int) -> dict:
+        return queue_call(queue_of().cancel, item_id)
+
+    @app.post("/api/queue/{item_id}/move")
+    def queue_move(item_id: int, body: MoveBody) -> list[dict]:
+        return queue_call(queue_of().move, item_id, body.to)
+
+    @app.post("/api/queue/printers/{printer_id}/plate")
+    def queue_plate(printer_id: str) -> dict:
+        queue_call(queue_of().confirm_plate, printer_id)
+        return queue_call(queue_of().listing, printer_id)
+
+    @app.post("/api/queue/printers/{printer_id}/pause")
+    def queue_pause(printer_id: str, body: PauseBody) -> dict:
+        queue_call(queue_of().set_paused, printer_id, body.paused)
+        return queue_call(queue_of().listing, printer_id)
 
     @app.get("/api/printers/{printer_id}/actions")
     def printer_actions(printer_id: str, limit: int = 20) -> list[dict]:
