@@ -1,9 +1,10 @@
 import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Link, useSearchParams } from "react-router-dom";
-import { Box, CheckCircle2, Download, Inbox, Printer as PrinterIcon, Search, Tag, Trash2, X } from "lucide-react";
+import { Box, CalendarClock, CheckCircle2, Download, Inbox, Printer as PrinterIcon, Search, Tag, Trash2, X } from "lucide-react";
 import { AppHeader } from "@/components/AppHeader";
 import { GcodeFileView } from "@/components/PrintView";
+import { ScheduleDialog } from "@/components/ScheduleDialog";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { usePrinters } from "@/hooks/usePrinters";
@@ -294,6 +295,8 @@ function FilePanel({ id, labels, onClose, onChanged }: { id: number; labels: Lab
   const [confirm, setConfirm] = React.useState(false);
   const [printOpen, setPrintOpen] = React.useState(false);
   const [sent, setSent] = React.useState(false);
+  const [scheduleOpen, setScheduleOpen] = React.useState(false);
+  const [scheduled, setScheduled] = React.useState(false);
   const [problem, setProblem] = React.useState<string | null>(null);
   const printerName = (pid: string | null) => printers.find((p) => p.id === pid)?.name ?? pid ?? "";
   const printer = f ? printTarget(f, printers) : undefined;
@@ -410,11 +413,31 @@ function FilePanel({ id, labels, onClose, onChanged }: { id: number; labels: Lab
                 </p>
               )}
 
+              {scheduled && (
+                <p role="status" className="m-0 flex items-center gap-2 rounded-lg border px-3.5 py-2.5 text-sm">
+                  <CalendarClock className="size-4 shrink-0 text-brand" aria-hidden="true" />
+                  <span>
+                    Added to the queue.{" "}
+                    <Link to="/queue" className="underline underline-offset-2">
+                      Open the queue
+                    </Link>
+                  </span>
+                </p>
+              )}
+
               <div className="flex flex-col gap-2 border-t pt-5">
                 <div className="flex flex-wrap justify-between gap-2">
                   <div className="flex flex-wrap gap-2">
                     <Button variant="brand" disabled={!!blocker} onClick={() => setPrintOpen(true)} title={blocker ?? undefined}>
                       <PrinterIcon /> Print
+                    </Button>
+                    <Button
+                      variant="outline"
+                      disabled={!config?.capture_files || !printer}
+                      onClick={() => setScheduleOpen(true)}
+                      title="Print it later: at a time, when the printer is free, or after another queued print"
+                    >
+                      <CalendarClock /> Schedule…
                     </Button>
                     <Button asChild variant="outline">
                       <a href={`/api/files/${f.id}/raw`} download={f.filename}>
@@ -428,6 +451,13 @@ function FilePanel({ id, labels, onClose, onChanged }: { id: number; labels: Lab
                 </div>
                 {blocker && !sent && <p className="m-0 text-[13px] text-muted-foreground">{blocker}</p>}
               </div>
+              <ScheduleDialog
+                open={scheduleOpen}
+                onOpenChange={setScheduleOpen}
+                file={f}
+                printer={printer}
+                onDone={() => setScheduled(true)}
+              />
               <PrintConfirm
                 f={f}
                 printer={printer}

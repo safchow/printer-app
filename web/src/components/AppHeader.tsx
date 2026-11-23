@@ -38,6 +38,9 @@ export function AppHeader() {
           <NavLink to="/files" className={link}>
             Files
           </NavLink>
+          <NavLink to="/queue" className={link}>
+            Queue
+          </NavLink>
           <NavLink to="/history" className={link}>
             History
           </NavLink>

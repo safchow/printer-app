@@ -78,6 +78,38 @@ class PrintJob(SQLModel, table=True):
     timelapse_bytes: int = 0
 
 
+class QueueItem(SQLModel, table=True):
+    """One stored file waiting to be printed later (app/queue.py has the rules)."""
+
+    __tablename__ = "print_queue"
+    id: int | None = Field(default=None, primary_key=True)
+    printer_id: str = Field(index=True)
+    file_id: int = Field(foreign_key="stored_file.id", index=True)
+    position: int = 0
+    mode: str  # at | idle | after
+    start_at: datetime | None = None  # UTC, for "at"
+    window_minutes: int | None = 120  # how long it may wait for the printer; None = any time
+    gap_minutes: int = 0  # for "after": minutes after the print above finished
+    after_id: int | None = None  # for "after": the item it follows
+    status: str = "scheduled"  # scheduled | starting | started | missed | failed | cancelled | needs_check
+    note: str | None = None  # what it's waiting for, or why it ended
+    command: str | None = None
+    job_id: int | None = Field(default=None, foreign_key="print_job.id")
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
+class QueueState(SQLModel, table=True):
+    """Per printer: whether its queue is paused, and when the plate was last confirmed clear."""
+
+    __tablename__ = "queue_state"
+    printer_id: str = Field(primary_key=True)
+    paused: bool = False
+    note: str | None = None
+    plate_confirmed_at: datetime | None = None
+
+
 def make_engine(database_url: str):
     return create_engine(database_url, connect_args={"check_same_thread": False})
 
@@ -89,4 +121,4 @@ def migrate(database_url: str) -> None:
     command.upgrade(cfg, "head")
 
 
-__all__ = ["ActionLog", "Label", "PrintJob", "Printer", "Session", "StoredFile", "make_engine", "migrate"]
+__all__ = ["ActionLog", "Label", "PrintJob", "Printer", "QueueItem", "QueueState", "Session", "StoredFile", "make_engine", "migrate"]

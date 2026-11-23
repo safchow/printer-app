@@ -61,6 +61,9 @@ On a phone:
   action log.
 - **Print from Files** (needs controls): send the app's copy of a kept file to
   the printer and start it, after a confirmation.
+- **Print queue** (needs controls): schedule a kept file for later (at a time,
+  when the printer is free, or after another queued print). It only starts
+  when the printer is idle and you've confirmed the plate is clear.
 - **File capture**: a copy of every `.gcode`/`.3mf` sent to the printer, with
   the slicer's thumbnail, time, material and filament, sorted with labels.
 - **History** of every print, how it ended, and the file it came from.
@@ -246,7 +249,8 @@ mid-print under that kind of load. This app was written with that in mind. It
 holds one websocket per printer, only talks to the host and port in
 `printers.yaml`, makes at most one camera handshake per printer every 5
 seconds, downloads a file only once (when it arrives, or when its print
-starts), and only uploads a file when you press Print.
+starts), and only uploads a file when you press Print or a print you queued
+starts.
 
 ## How it works
 
@@ -402,6 +406,38 @@ How the file is uploaded is set per printer in `printers.yaml` with `upload:`:
 
 The uploaded `printer-app_*` files stay on the printer until you delete them
 there.
+
+## Print queue
+
+**Schedule…** on a file's panel (next to Print) adds it to that printer's
+queue, which you manage on the **Queue** page (desktop). Each item starts:
+
+- **At a time** ("in 6 h", or a date and time). If the printer is busy then,
+  it waits up to its window (30 min, 2 h, 6 h or any time) and is then marked
+  **Missed**, so a print never starts later than you allowed.
+- **When idle**: as soon as the printer is free.
+- **After previous**: after the item above it finishes *successfully*, plus an
+  optional gap. If that print is cancelled or fails, it holds.
+
+Only the item at the top of the list is started, and only when all of these
+hold: the queue isn't paused, controls are on, the printer reports idle,
+complete or cancelled, and the **plate is confirmed clear**. The app can't see
+the bed, so you confirm it (in the Schedule dialog, or with **Plate cleared**
+on the Queue page), and that confirmation expires as soon as any print starts
+or ends on that printer, including ones started from the slicer or the
+touchscreen.
+
+Waiting sends nothing to the printer: the queue reads the status the app
+already gets over its one websocket. Starting is the Print button's own path
+(one upload, one start command, the same checks and action log, with device
+`queue`), tried **once**. If it fails, the item is marked Failed and that
+printer's queue pauses until you switch it back on. If the app stops in the
+middle of starting an item, it's marked **Needs check** on the next start and
+never retried by itself, since the printer may already be printing it.
+
+The queue lives in the database (`print_queue`, `queue_state`), so restarts
+and updates don't lose it. Times are stored in UTC. It needs file capture
+(`CAPTURE_FILES`) on.
 
 ## Time-lapses
 
