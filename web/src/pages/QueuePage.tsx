@@ -41,6 +41,13 @@ const STATUS_LABEL: Record<QueueStatus, string> = {
   needs_check: "Needs check",
 };
 
+// The status badge already says "Starting", "Scheduled" and so on, so only show a note that adds to it.
+function extraNote(i: { status: QueueStatus; note?: string | null }): string | null {
+  if (!i.note) return null;
+  const plain = (t: string) => t.replace(/[.…\s]+$/, "").toLowerCase();
+  return plain(i.note) === plain(STATUS_LABEL[i.status]) ? null : i.note;
+}
+
 function Badge({ className, children }: { className?: string; children: React.ReactNode }) {
   return <span className={cn("inline-block rounded-full px-2.5 py-0.5 text-xs font-medium whitespace-nowrap", className)}>{children}</span>;
 }
@@ -165,7 +172,7 @@ function PrinterSection({ q }: { q: PrinterQueue }) {
                   </td>
                   <td className="py-3.5 pr-4">
                     <Badge className={STATUS_STYLE[i.status]}>{STATUS_LABEL[i.status]}</Badge>
-                    {i.note && i.note !== "Scheduled" && <span className="mt-1 block text-[13px] text-muted-foreground">{i.note}</span>}
+                    {extraNote(i) && <span className="mt-1 block text-[13px] text-muted-foreground">{extraNote(i)}</span>}
                   </td>
                   <td className="py-3.5">
                     <div className="flex justify-end gap-1">
@@ -203,7 +210,7 @@ function PrinterSection({ q }: { q: PrinterQueue }) {
                 <Badge className={STATUS_STYLE[i.status]}>
                   {STATUS_LABEL[i.status]} {dayAndClock(i.status === "started" ? i.started_at : i.finished_at)}
                 </Badge>
-                {i.note && i.status !== "started" && <span className="text-[13px] text-muted-foreground">{i.note}</span>}
+                {i.status !== "started" && extraNote(i) && <span className="text-[13px] text-muted-foreground">{extraNote(i)}</span>}
                 <span className="ml-auto flex gap-2">
                   {i.job_id != null && (
                     <Link to={`/history/${i.job_id}`} className="text-muted-foreground underline underline-offset-2">
